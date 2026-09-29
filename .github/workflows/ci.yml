@@ -30,20 +30,21 @@ jobs:
       - name: Check formatting
         run: cargo fmt --all -- --check
       - name: Lint all targets
-        shell: bash
+        shell: python
         run: |
-          if output=$(cargo clippy --quiet --locked --all-targets --all-features -- -D warnings 2>&1); then
-            printf '%s\n' "$output"
-          else
-            status=$?
-            printf '%s\n' "$output"
-            # Keep Cargo errors visible in the checks API as well as downloadable logs.
-            diagnostic="${output: -3000}"
-            diagnostic="${diagnostic//%/%25}"
-            diagnostic="${diagnostic//$'\r'/%0D}"
-            diagnostic="${diagnostic//$'\n'/%0A}"
-            printf '::error title=Cargo Clippy failed::%s\n' "$diagnostic"
-            exit "$status"
-          fi
+          import base64
+          import subprocess
+          import sys
+
+          result = subprocess.run(
+              ["cargo", "clippy", "--locked", "--all-targets", "--all-features", "--", "-D", "warnings"],
+              stdout=subprocess.PIPE,
+              stderr=subprocess.STDOUT,
+          )
+          print(result.stdout.decode("utf-8", errors="replace"), flush=True)
+          if result.returncode:
+              diagnostic = base64.b64encode(result.stdout[-1800:]).decode("ascii")
+              print(f"::error title=Cargo Clippy failed::Exit {result.returncode}; {len(result.stdout)} output bytes; base64 tail: {diagnostic}", flush=True)
+          sys.exit(result.returncode)
       - name: Run tests
         run: cargo test --locked --all-targets --all-features
