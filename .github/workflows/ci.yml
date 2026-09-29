@@ -30,6 +30,20 @@ jobs:
       - name: Check formatting
         run: cargo fmt --all -- --check
       - name: Lint all targets
-        run: cargo clippy --locked --all-targets --all-features -- -D warnings
+        shell: bash
+        run: |
+          if output=$(cargo clippy --locked --all-targets --all-features -- -D warnings 2>&1); then
+            printf '%s\n' "$output"
+          else
+            status=$?
+            printf '%s\n' "$output"
+            # Keep Cargo errors visible in the checks API as well as downloadable logs.
+            diagnostic="${output: -6000}"
+            diagnostic="${diagnostic//%/%25}"
+            diagnostic="${diagnostic//$'\r'/%0D}"
+            diagnostic="${diagnostic//$'\n'/%0A}"
+            printf '::error title=Cargo Clippy failed::%s\n' "$diagnostic"
+            exit "$status"
+          fi
       - name: Run tests
         run: cargo test --locked --all-targets --all-features
