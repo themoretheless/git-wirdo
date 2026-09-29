@@ -4,7 +4,7 @@ use std::fs;
 use std::path::Path;
 
 use git_wirdo::git::{ConflictSide, Repository};
-use support::{TempDirectory, TestRepo, git, git_output, init, merge_conflict, rebase_conflict};
+use support::{TempDirectory, TestRepo, git, git_output, merge_conflict, rebase_conflict};
 
 #[test]
 fn unborn_repository_can_stage_and_unstage_without_removing_working_files() {
@@ -84,25 +84,13 @@ fn stage_and_unstage_use_literal_paths_including_pathspec_magic() {
 }
 
 #[cfg(unix)]
-#[test]
-fn arbitrary_filename_bytes_are_preserved_for_git_operations() {
-    use std::ffi::OsString;
-    use std::os::unix::ffi::OsStringExt;
-    use std::path::PathBuf;
-
+fn assert_unix_file_roundtrips(names: &[std::path::PathBuf]) {
     let fixture = TestRepo::new();
-    let names = [
-        PathBuf::from("line\nbreak\t\".txt"),
-        PathBuf::from("trailing space "),
-        PathBuf::from("*.txt"),
-        PathBuf::from(":(glob)*"),
-        PathBuf::from(OsString::from_vec(b"non-utf8-\xff.txt".to_vec())),
-    ];
-    for name in &names {
+    for name in names {
         fixture.write(name, "content\n");
     }
     let repo = fixture.open();
-    for name in &names {
+    for name in names {
         let state = repo.load_state().unwrap();
         let file = state.files.iter().find(|file| file.path == *name).unwrap();
         repo.stage(file).unwrap();
@@ -112,6 +100,33 @@ fn arbitrary_filename_bytes_are_preserved_for_git_operations() {
             .unwrap();
         assert!(fixture.path.join(name).exists());
     }
+}
+
+#[cfg(unix)]
+#[test]
+fn special_unix_filenames_are_preserved_for_git_operations() {
+    use std::path::PathBuf;
+
+    assert_unix_file_roundtrips(&[
+        PathBuf::from("line\nbreak\t\".txt"),
+        PathBuf::from("trailing space "),
+        PathBuf::from("*.txt"),
+        PathBuf::from(":(glob)*"),
+    ]);
+}
+
+#[cfg(target_os = "linux")]
+#[test]
+fn non_utf8_filenames_are_preserved_on_supporting_filesystems() {
+    use std::ffi::OsString;
+    use std::os::unix::ffi::OsStringExt;
+    use std::path::PathBuf;
+
+    // macOS filesystems reject these names before Git can read them. The status
+    // parser's byte preservation is tested separately on every Unix target.
+    assert_unix_file_roundtrips(&[PathBuf::from(OsString::from_vec(
+        b"non-utf8-\xff.txt".to_vec(),
+    ))]);
 }
 
 #[test]
@@ -164,7 +179,7 @@ fn opening_a_subdirectory_normalizes_operations_to_the_repository_root() {
 fn repository_paths_are_not_trimmed_or_split_at_newlines() {
     let directory = TempDirectory::new();
     let path = directory.0.join("repo with trailing newline\n");
-    init(&path);
+    support::init(&path);
     let repo = Repository::open(&path).unwrap();
     assert_eq!(
         fs::canonicalize(repo.root()).unwrap(),

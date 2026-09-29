@@ -548,6 +548,15 @@ mod tests {
         assert!(files[2].unstaged && !files[2].staged);
     }
 
+    #[cfg(unix)]
+    #[test]
+    fn status_preserves_non_utf8_path_bytes_without_filesystem_assumptions() {
+        use std::os::unix::ffi::OsStrExt;
+
+        let files = parse_status(b"?? non-utf8-\xff.txt\0").unwrap();
+        assert_eq!(files[0].path.as_os_str().as_bytes(), b"non-utf8-\xff.txt");
+    }
+
     #[test]
     fn copies_do_not_include_the_source_in_mutating_pathspecs() {
         let files = parse_status(b"C  copy\0source\0").unwrap();

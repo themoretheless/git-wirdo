@@ -62,8 +62,7 @@ Git actions, not undo commands.
 ## Reliability and behavior
 
 - Status uses NUL-delimited porcelain output, not human-formatted Git output.
-  Spaces, quotes, newlines, renames, Unicode, and (on Unix) non-UTF-8 filename
-  bytes are preserved. Control characters are escaped for display only.
+  Spaces, quotes, newlines, renames, Unicode, and non-UTF-8 filename bytes (on compatible Unix filesystems) are preserved. Control characters are escaped for display only.
 - File arguments are literal pathspecs. A file named `[abc].txt` or `*.rs` cannot
   accidentally stage other matching files. Unstaging a rename handles both names.
 - Unstaging before the first commit removes the index entry, **not** the working file.
