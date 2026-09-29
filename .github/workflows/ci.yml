@@ -30,21 +30,6 @@ jobs:
       - name: Check formatting
         run: cargo fmt --all -- --check
       - name: Lint all targets
-        shell: python
-        run: |
-          import base64
-          import subprocess
-          import sys
-
-          result = subprocess.run(
-              ["cargo", "clippy", "--locked", "--all-targets", "--all-features", "--", "-D", "warnings"],
-              stdout=subprocess.PIPE,
-              stderr=subprocess.STDOUT,
-          )
-          print(result.stdout.decode("utf-8", errors="replace"), flush=True)
-          if result.returncode:
-              diagnostic = base64.b64encode(result.stdout[-1800:]).decode("ascii")
-              print(f"::error title=Cargo Clippy failed::Exit {result.returncode}; {len(result.stdout)} output bytes; base64 tail: {diagnostic}", flush=True)
-          sys.exit(result.returncode)
+        run: python .github/scripts/run_check.py cargo clippy --locked --all-targets --all-features -- -D warnings
       - name: Run tests
-        run: cargo test --locked --all-targets --all-features
+        run: python .github/scripts/run_check.py cargo test --locked --all-targets --all-features

@@ -117,12 +117,10 @@ impl Repository {
         )?;
         let text = String::from_utf8_lossy(&bytes);
         let fields: Vec<_> = text.split_terminator('\0').collect();
-        ensure!(
-            fields.len().is_multiple_of(5),
-            "Invalid commit record from Git"
-        );
-        Ok(fields
-            .chunks_exact(5)
+        let (records, remainder) = fields.as_chunks::<5>();
+        ensure!(remainder.is_empty(), "Invalid commit record from Git");
+        Ok(records
+            .iter()
             .map(|parts| CommitEntry {
                 sha: parts[0].to_owned(),
                 short_sha: parts[1].to_owned(),
