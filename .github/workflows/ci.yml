@@ -20,7 +20,7 @@ jobs:
         os: [ubuntu-latest, macos-latest, windows-latest]
     runs-on: ${{ matrix.os }}
     env:
-      CARGO_TERM_COLOR: always
+      CARGO_TERM_COLOR: never
     steps:
       - uses: actions/checkout@v4
       - uses: dtolnay/rust-toolchain@stable
@@ -32,13 +32,13 @@ jobs:
       - name: Lint all targets
         shell: bash
         run: |
-          if output=$(cargo clippy --locked --all-targets --all-features -- -D warnings 2>&1); then
+          if output=$(cargo clippy --quiet --locked --all-targets --all-features -- -D warnings 2>&1); then
             printf '%s\n' "$output"
           else
             status=$?
             printf '%s\n' "$output"
             # Keep Cargo errors visible in the checks API as well as downloadable logs.
-            diagnostic="${output: -6000}"
+            diagnostic="${output: -3000}"
             diagnostic="${diagnostic//%/%25}"
             diagnostic="${diagnostic//$'\r'/%0D}"
             diagnostic="${diagnostic//$'\n'/%0A}"
