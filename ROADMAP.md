@@ -40,12 +40,16 @@ Implemented foundations:
   paginated file/inline-comment inspection and validated inline comment publication.
   Remote mutation requests are fixture-tested; no live review/comment was posted.
 
+- Persistent recent repository/worktree navigation and per-root views, history
+  graph/size and PR filters; explicit resume and persistence opt-out. Atomic,
+  locked state merging preserves other clients' roots and damaged settings.
+  Restart and damaged-state behavior verified through a real Unix PTY.
+
 Remaining acceptance work:
 
 - Complete native Windows runtime verification of background process-tree
   cancellation (cross compilation alone does not prove behavior).
 
-- Persist repository/workspace navigation and useful view settings.
 - End-to-end TUI verification for each primary workflow; stable CI checks and
   platform-specific filename/terminal behavior remain regression requirements.
 

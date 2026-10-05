@@ -22,6 +22,19 @@ fn screen(app: &App, width: u16, height: u16) -> String {
 }
 
 #[test]
+fn recent_navigation_and_settings_errors_are_visible_without_path_controls() {
+    let repo = TestRepo::new();
+    let mut app = App::new(repo.open()).unwrap();
+    app.handle(Action::RecentRepositories);
+    app.persistence_error = Some("Corrupt settings; saving disabled".into());
+    let rendered = screen(&app, 180, 28);
+    assert!(rendered.contains("View: RecentRepositories"));
+    assert!(rendered.contains("D forget entry"));
+    assert!(rendered.contains("Corrupt settings; saving disabled"));
+    assert!(rendered.contains("Saved view: Files"));
+}
+
+#[test]
 fn header_and_action_message_fit_inside_their_borders() {
     let fixture = TestRepo::new();
     let mut app = App::new(fixture.open()).unwrap();

@@ -35,6 +35,143 @@ impl Drop for Pty {
         let _ = self.child.wait();
     }
 }
+
+fn state_pty(repo: &TestRepo, path: &std::path::Path) -> Pty {
+    let (mut master, mut slave) = (-1, -1);
+    let mut size = libc::winsize {
+        ws_row: 30,
+        ws_col: 180,
+        ws_xpixel: 0,
+        ws_ypixel: 0,
+    };
+    assert_eq!(
+        unsafe {
+            libc::openpty(
+                &mut master,
+                &mut slave,
+                std::ptr::null_mut(),
+                std::ptr::null_mut(),
+                &mut size,
+            )
+        },
+        0
+    );
+    let master = unsafe { File::from_raw_fd(master) };
+    let slave = unsafe { File::from_raw_fd(slave) };
+    let child = Command::new(env!("CARGO_BIN_EXE_git-wirdo"))
+        .arg("--repo")
+        .arg(&repo.path)
+        .arg("--state-file")
+        .arg(path)
+        .env("TERM", "xterm-256color")
+        .stdin(Stdio::from(slave.try_clone().unwrap()))
+        .stdout(Stdio::from(slave.try_clone().unwrap()))
+        .stderr(Stdio::from(slave.try_clone().unwrap()))
+        .spawn()
+        .unwrap();
+    let flags = unsafe { libc::fcntl(master.as_raw_fd(), libc::F_GETFL) };
+    assert_ne!(flags, -1);
+    assert_eq!(
+        unsafe { libc::fcntl(master.as_raw_fd(), libc::F_SETFL, flags | libc::O_NONBLOCK) },
+        0
+    );
+    Pty {
+        master: Some(master),
+        slave: Some(slave),
+        child,
+    }
+}
+fn wait_screen(pty: &mut Pty, text: &str) -> String {
+    let deadline = Instant::now() + Duration::from_secs(10);
+    let mut output = Vec::new();
+    loop {
+        let mut chunk = [0; 16384];
+        match pty.master.as_mut().unwrap().read(&mut chunk) {
+            Ok(n) => output.extend_from_slice(&chunk[..n]),
+            Err(e) if e.kind() == std::io::ErrorKind::WouldBlock => {}
+            Err(e) => panic!("terminal read: {e}"),
+        }
+        let rendered = String::from_utf8_lossy(&output);
+        if rendered.contains(text) {
+            return rendered.into_owned();
+        }
+        assert!(
+            Instant::now() < deadline,
+            "terminal never showed {text}: {rendered}"
+        );
+        thread::sleep(Duration::from_millis(10));
+    }
+}
+fn quit_state_pty(pty: &mut Pty) {
+    pty.master.as_mut().unwrap().write_all(b"q").unwrap();
+    let deadline = Instant::now() + Duration::from_secs(5);
+    loop {
+        let mut drain = [0; 16384];
+        let _ = pty.master.as_mut().unwrap().read(&mut drain);
+        if let Some(status) = pty.child.try_wait().unwrap() {
+            assert!(status.success());
+            return;
+        }
+        assert!(Instant::now() < deadline, "terminal did not quit");
+        thread::sleep(Duration::from_millis(10));
+    }
+}
+
+#[test]
+fn terminal_restarts_in_saved_view_and_survives_corrupt_settings_without_overwriting() {
+    use git_wirdo::{model::ViewMode, settings};
+    let repo = TestRepo::new();
+    repo.write("file", "base");
+    repo.commit_all("base");
+    let head = repo.git(&["rev-parse", "HEAD"]);
+    let path = repo.directory.0.join("state.json");
+    {
+        let mut pty = state_pty(&repo, &path);
+        wait_screen(&mut pty, "Refreshed");
+        pty.master.as_mut().unwrap().write_all(b"\t").unwrap();
+        // Header precedes worker completion; Refreshed/History output can arrive
+        // in the same frame. Wait for idle before sending quit to retain the view.
+        let deadline = Instant::now() + Duration::from_secs(5);
+        loop {
+            let mut drain = [0; 16384];
+            let _ = pty.master.as_mut().unwrap().read(&mut drain);
+            if settings::load(&path).is_ok_and(|s| {
+                s.repositories
+                    .first()
+                    .is_some_and(|s| s.view == ViewMode::History)
+            }) {
+                break;
+            }
+            assert!(Instant::now() < deadline, "History view was not saved");
+            thread::sleep(Duration::from_millis(10));
+        }
+        quit_state_pty(&mut pty);
+    }
+    assert_eq!(
+        settings::load(&path).unwrap().repositories[0].view,
+        ViewMode::History
+    );
+    {
+        let mut pty = state_pty(&repo, &path);
+        let screen = wait_screen(&mut pty, "Refreshed");
+        assert!(screen.contains("History"));
+        quit_state_pty(&mut pty);
+    }
+    std::fs::write(&path, "damaged external state").unwrap();
+    {
+        let mut pty = state_pty(&repo, &path);
+        // Ratatui emits cursor moves instead of literal spaces between words.
+        let screen = wait_screen(&mut pty, "disabled:");
+        assert!(screen.contains("Files"));
+        quit_state_pty(&mut pty);
+    }
+    assert_eq!(
+        std::fs::read_to_string(path).unwrap(),
+        "damaged external state"
+    );
+    assert_eq!(repo.git(&["rev-parse", "HEAD"]), head);
+    assert!(repo.git(&["status", "--porcelain"]).is_empty());
+}
 #[test]
 fn actual_terminal_stays_responsive_during_hook_and_quits_with_restored_modes() {
     let r = TestRepo::new();
@@ -82,7 +219,7 @@ fn actual_terminal_stays_responsive_during_hook_and_quits_with_restored_modes() 
     );
     let mut command = Command::new(env!("CARGO_BIN_EXE_git-wirdo"));
     command
-        .args(["--repo"])
+        .args(["--no-state", "--repo"])
         .arg(&r.path)
         .env("TERM", "xterm-256color")
         .stdin(Stdio::from(slave.try_clone().unwrap()))

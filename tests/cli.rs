@@ -15,6 +15,103 @@ fn help_documents_repository_and_headless_options() {
     let text = String::from_utf8(output.stdout).unwrap();
     assert!(text.contains("--repo"));
     assert!(text.contains("--headless"));
+    for flag in ["--resume", "--list-recent", "--state-file", "--no-state"] {
+        assert!(text.contains(flag));
+    }
+}
+
+#[test]
+fn recent_listing_and_explicit_resume_work_outside_a_repo_without_writing_state() {
+    let repo = TestRepo::new();
+    repo.write("unsaved.txt", "retain");
+    let path = repo.directory.0.join("state.json");
+    let app = git_wirdo::app::App::new(repo.open()).unwrap();
+    git_wirdo::settings::save(&path, &app.navigation).unwrap();
+    let bytes = std::fs::read(&path).unwrap();
+    let output = binary()
+        .current_dir(&repo.directory.0)
+        .args(["--state-file"])
+        .arg(&path)
+        .arg("--list-recent")
+        .output()
+        .unwrap();
+    assert!(output.status.success());
+    assert!(String::from_utf8(output.stdout).unwrap().contains("repo"));
+    let output = binary()
+        .current_dir(&repo.directory.0)
+        .args(["--state-file"])
+        .arg(&path)
+        .args(["--resume", "--headless"])
+        .output()
+        .unwrap();
+    assert!(
+        output.status.success(),
+        "{}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    assert!(
+        String::from_utf8(output.stdout)
+            .unwrap()
+            .contains("unsaved.txt")
+    );
+    assert_eq!(std::fs::read(path).unwrap(), bytes);
+}
+
+#[test]
+fn default_current_directory_and_headless_inspection_ignore_saved_navigation() {
+    let current = TestRepo::new();
+    let other = TestRepo::new();
+    current.write("current.txt", "one");
+    other.write("other.txt", "two");
+    let path = other.directory.0.join("state.json");
+    git_wirdo::settings::save(
+        &path,
+        &git_wirdo::app::App::new(other.open()).unwrap().navigation,
+    )
+    .unwrap();
+    let output = binary()
+        .current_dir(&current.path)
+        .env("GIT_WIRDO_STATE_FILE", &path)
+        .arg("--headless")
+        .output()
+        .unwrap();
+    assert!(output.status.success());
+    let text = String::from_utf8(output.stdout).unwrap();
+    assert!(text.contains("current.txt") && !text.contains("other.txt"));
+    std::fs::write(&path, "broken").unwrap();
+    let output = binary()
+        .current_dir(&current.path)
+        .env("GIT_WIRDO_STATE_FILE", &path)
+        .arg("--headless")
+        .output()
+        .unwrap();
+    assert!(output.status.success());
+    assert_eq!(std::fs::read_to_string(path).unwrap(), "broken");
+}
+
+#[test]
+fn resume_requires_a_saved_repo_and_conflicting_options_are_rejected() {
+    let directory = TempDirectory::new();
+    let path = directory.0.join("missing.json");
+    let output = binary()
+        .args(["--resume", "--state-file"])
+        .arg(&path)
+        .output()
+        .unwrap();
+    assert!(!output.status.success());
+    assert!(String::from_utf8_lossy(&output.stderr).contains("No saved recent repository"));
+    for args in [["--resume", "--no-state"], ["--list-recent", "--no-state"]] {
+        assert!(!binary().args(args).output().unwrap().status.success());
+    }
+    assert!(
+        !binary()
+            .args(["--resume", "--repo"])
+            .arg(&directory.0)
+            .output()
+            .unwrap()
+            .status
+            .success()
+    );
 }
 
 #[test]

@@ -9,7 +9,7 @@ use crate::model::{ViewMode, display_path};
 
 #[derive(Default)]
 pub struct Ui {
-    lists: [ListState; 14],
+    lists: [ListState; 15],
 }
 
 impl Ui {
@@ -88,6 +88,7 @@ impl Ui {
         frame.render_widget(detail, body[1]);
 
         let actions = match app.view {
+            ViewMode::RecentRepositories => "enter open | D forget entry | O open path",
             ViewMode::Hunks => {
                 "s stage unstaged hunk | u unstage staged hunk | d staged/unstaged | tab files"
             }
@@ -117,10 +118,10 @@ impl Ui {
             Style::default()
         };
         let footer = Paragraph::new(vec![
-            Line::from(if let Some(prompt) = &app.prompt { format!("{}: {}_ (Enter next, Esc cancel)", prompt.labels[prompt.values.len()], safe_text(&prompt.text).replace('\n', "↵")) } else if app.searching { format!("Find: {}_ (Enter search, Esc cancel)", safe_text(&app.search)) } else { "tab view | j/k select | PgUp/PgDn diff | / find | n next | d base | v seen | r refresh | q quit".into() }),
+            Line::from(if let Some(prompt) = &app.prompt { format!("{}: {}_ (Enter next, Esc cancel)", prompt.labels[prompt.values.len()], safe_text(&prompt.text).replace('\n', "↵")) } else if app.searching { format!("Find: {}_ (Enter search, Esc cancel)", safe_text(&app.search)) } else { "tab view | I recent | j/k select | PgUp/PgDn diff | / find | n next | d base | v seen | r refresh | q quit".into() }),
             Line::from(actions),
             Line::from(Span::styled(
-                format!("Action: {}", safe_text(&app.message).replace('\n', " | ")),
+                format!("Action: {}{}", safe_text(&app.message).replace('\n', " | "), app.persistence_error.as_ref().map(|e| format!(" | Settings: {}", safe_text(e).replace('\n', " | "))).unwrap_or_default()),
                 message_style,
             )),
         ])
@@ -131,6 +132,20 @@ impl Ui {
 
 fn list_items(app: &App) -> (Vec<ListItem<'static>>, bool) {
     let (lines, empty): (Vec<String>, &str) = match app.view {
+        ViewMode::RecentRepositories => (
+            app.navigation
+                .repositories
+                .iter()
+                .map(|settings| {
+                    settings
+                        .root
+                        .path()
+                        .map(|p| display_path(&p))
+                        .unwrap_or_else(|e| format!("Invalid saved path: {e}"))
+                })
+                .collect(),
+            "No recent repositories",
+        ),
         ViewMode::Hunks => (
             app.hunks
                 .iter()

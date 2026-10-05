@@ -10,6 +10,7 @@ use crate::model::{RepoState, ViewMode, display_path};
 /// UI-independent commands; terminal key bindings live in `input`.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Action {
+    RecentRepositories,
     ResetCommit,
     ToggleGraph,
     LoadHistory,
@@ -119,6 +120,9 @@ pub struct Prompt {
 
 #[derive(Debug, Clone)]
 pub struct App {
+    pub navigation: crate::settings::Navigation,
+    pub recent_selection: usize,
+    pub persistence_error: Option<String>,
     pub repository: Repository,
     pub state: RepoState,
     pub view: ViewMode,
@@ -169,9 +173,27 @@ pub struct App {
 }
 
 impl App {
+    pub fn capture_navigation(&mut self) {
+        if self.view == ViewMode::RecentRepositories {
+            return;
+        }
+        let mut navigation = std::mem::take(&mut self.navigation);
+        navigation.remember(self, false);
+        self.navigation = navigation;
+    }
+
+    pub fn restore_navigation(&mut self, mut navigation: crate::settings::Navigation) {
+        navigation.restore(self);
+        navigation.remember(self, true);
+        self.navigation = navigation;
+    }
+
     pub fn new(repository: Repository) -> Result<Self> {
         let state = repository.load_state()?;
         let mut app = Self {
+            navigation: crate::settings::Navigation::default(),
+            recent_selection: 0,
+            persistence_error: None,
             repository,
             state,
             view: ViewMode::Files,
@@ -228,6 +250,9 @@ impl App {
                 ..Default::default()
             });
         app.refresh_detail();
+        let mut navigation = std::mem::take(&mut app.navigation);
+        navigation.remember(&app, true);
+        app.navigation = navigation;
         Ok(app)
     }
 
@@ -383,6 +408,7 @@ impl App {
 
     pub fn selection(&self) -> usize {
         match self.view {
+            ViewMode::RecentRepositories => self.recent_selection,
             ViewMode::PrFiles => self.pr_file_selection,
             ViewMode::Reflog => self.reflog_selection,
             ViewMode::Hunks => self.hunk_selection,
@@ -403,6 +429,10 @@ impl App {
     fn move_selection(&mut self, delta: isize) {
         let file_len = self.displayed_files().len();
         let (selection, len) = match self.view {
+            ViewMode::RecentRepositories => (
+                &mut self.recent_selection,
+                self.navigation.repositories.len(),
+            ),
             ViewMode::PrFiles => (&mut self.pr_file_selection, self.pr_files.len()),
             ViewMode::Reflog => (&mut self.reflog_selection, self.reflog.len()),
             ViewMode::Hunks => (&mut self.hunk_selection, self.hunks.len()),
@@ -452,6 +482,10 @@ impl App {
 
     fn selected_detail(&self) -> Result<String> {
         match self.view {
+            ViewMode::RecentRepositories => match self.navigation.repositories.get(self.recent_selection) {
+                Some(settings) => Ok(format!("{}\nSaved view: {:?}\nEnter opens this working tree; O opens another path.\nD forgets this entry without deleting any files.", display_path(&settings.root.path()?), settings.view)),
+                None => Ok("No recent repositories; O opens a local repository.".into()),
+            },
             ViewMode::PrFiles => match (self.review_pr.as_ref(), self.pr_files.get(self.pr_file_selection)) {
                 (Some(pr), Some(file)) => file.detail(pr),
                 _ => Ok("No PR file selected; use i in PullRequests to load reviewed files.".into()),
@@ -644,7 +678,16 @@ impl App {
     fn open_repository(&mut self, path: &std::path::Path) -> Result<()> {
         // Construct first: a failed open leaves the existing repository intact.
         let mut replacement = Self::new(Repository::open(path)?)?;
-        replacement.message = "Opened repository".into();
+        let mut navigation = self.navigation.clone();
+        navigation.remember(self, false);
+        navigation.restore(&mut replacement);
+        navigation.remember(&replacement, true);
+        replacement.navigation = navigation;
+        replacement.persistence_error = self.persistence_error.clone();
+        replacement.handle(Action::Refresh);
+        if !replacement.message_is_error {
+            replacement.message = "Opened repository".into();
+        }
         *self = replacement;
         Ok(())
     }
@@ -999,6 +1042,29 @@ impl App {
 
     fn apply(&mut self, action: Action) -> Result<()> {
         match action {
+            Action::RecentRepositories => {
+                self.capture_navigation();
+                self.view = ViewMode::RecentRepositories;
+                self.recent_selection = 0;
+                self.refresh_detail();
+            }
+            Action::SwitchBranch if self.view == ViewMode::RecentRepositories => {
+                if let Some(settings) = self.navigation.repositories.get(self.recent_selection) {
+                    let path = settings.root.path()?;
+                    self.open_repository(&path)?;
+                }
+            }
+            Action::Remove if self.view == ViewMode::RecentRepositories => {
+                if self.recent_selection < self.navigation.repositories.len() {
+                    self.navigation.repositories.remove(self.recent_selection);
+                    self.recent_selection = self
+                        .recent_selection
+                        .min(self.navigation.repositories.len().saturating_sub(1));
+                    self.refresh_detail();
+                    self.message = "Forgot recent entry; working tree remains on disk".into();
+                    self.message_is_error = false;
+                }
+            }
             Action::LoadHistory if self.view == ViewMode::PullRequests => {
                 self.pr_filter.limit = self.pr_filter.limit.saturating_add(100);
                 self.load_extra()?;

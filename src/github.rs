@@ -106,7 +106,7 @@ fn run_program_input(
     .into_owned())
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct PrFilter {
     pub state: String,
     pub search: String,

@@ -7,6 +7,7 @@ pub mod patch;
 pub mod pr_review;
 pub mod process;
 pub mod session;
+pub mod settings;
 pub mod ui;
 
 #[cfg(test)]

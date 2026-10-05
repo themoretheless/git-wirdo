@@ -79,7 +79,7 @@ impl MergeState {
     }
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
 pub enum ViewMode {
     Files,
     History,
@@ -95,6 +95,7 @@ pub enum ViewMode {
     Hunks,
     Reflog,
     PrFiles,
+    RecentRepositories,
 }
 
 impl ViewMode {
@@ -114,6 +115,7 @@ impl ViewMode {
             Self::Hunks => 11,
             Self::Reflog => 12,
             Self::PrFiles => 13,
+            Self::RecentRepositories => 14,
         }
     }
 
@@ -132,7 +134,8 @@ impl ViewMode {
             Self::Tags => Self::Hunks,
             Self::Hunks => Self::Reflog,
             Self::Reflog => Self::PrFiles,
-            Self::PrFiles => Self::Files,
+            Self::PrFiles => Self::RecentRepositories,
+            Self::RecentRepositories => Self::Files,
         }
     }
 }

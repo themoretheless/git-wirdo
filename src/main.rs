@@ -11,6 +11,18 @@ use git_wirdo::model::display_path;
 #[derive(Debug, Parser)]
 #[command(name = "git-wirdo", version, about = "A Rust-based Git workflow UI")]
 struct Cli {
+    /// Use a specific UI state file instead of the user configuration directory.
+    #[arg(long, value_name = "PATH", conflicts_with = "no_state")]
+    state_file: Option<PathBuf>,
+    /// Disable reading/writing saved UI navigation and settings.
+    #[arg(long, conflicts_with_all = ["resume", "list_recent"])]
+    no_state: bool,
+    /// Open the last saved working tree instead of the current directory.
+    #[arg(long, conflicts_with = "repo")]
+    resume: bool,
+    /// List saved recent repository/worktree paths without starting the TUI.
+    #[arg(long, group = "inspection")]
+    list_recent: bool,
     /// A working tree or any directory inside it (defaults to the current directory).
     #[arg(long, value_name = "PATH")]
     repo: Option<PathBuf>,
@@ -65,8 +77,26 @@ fn main() -> Result<()> {
         anyhow::ensure!(status.success(), "GitHub login failed");
         return Ok(());
     }
+    let settings_path = || {
+        cli.state_file
+            .clone()
+            .map(Ok)
+            .unwrap_or_else(git_wirdo::settings::default_path)
+    };
+    if cli.list_recent {
+        for settings in git_wirdo::settings::load(&settings_path()?)?.repositories {
+            println!("{}", display_path(&settings.root.path()?));
+        }
+        return Ok(());
+    }
     let path = match cli.repo {
         Some(path) => path,
+        None if cli.resume => git_wirdo::settings::load(&settings_path()?)?
+            .repositories
+            .first()
+            .context("No saved recent repository; use --repo PATH")?
+            .root
+            .path()?,
         None => env::current_dir().context("Cannot determine the current directory")?,
     };
     let repository = Repository::open(&path)?;
@@ -173,5 +203,12 @@ fn main() -> Result<()> {
         }
         return Ok(());
     }
-    terminal::run(repository)
+    terminal::run(
+        repository,
+        if cli.no_state {
+            None
+        } else {
+            Some(settings_path()?)
+        },
+    )
 }

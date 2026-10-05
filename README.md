@@ -161,7 +161,7 @@ Search is case-sensitive: loaded commit metadata in History, selected details in
 ## Workspaces and GitHub
 
 Tab cycles Files → History → Branches → Conflicts → Workspaces → PullRequests →
-GitHubRepositories → Stashes → Remotes → RemoteBranches → Tags → Hunks → Reflog → PrFiles. `O` opens another local repository by path; the previous
+GitHubRepositories → Stashes → Remotes → RemoteBranches → Tags → Hunks → Reflog → PrFiles → RecentRepositories. `O` opens another local repository by path; the previous
 checkout and its files remain on disk. Relative paths are resolved from the
 current repository root. Workspaces are Git linked worktrees, not cloud sessions. Listing uses the
 [NUL-delimited porcelain format](https://git-scm.com/docs/git-worktree/2.36.0),
@@ -172,6 +172,29 @@ and new branch name, then creates a worktree from the current HEAD. `D` asks you
 to type `remove` before removing the selected worktree. The current checkout,
 primary checkout, dirty and locked worktrees cannot be removed. Branches are
 retained, including their unique commits; removal never uses force.
+
+`I` opens RecentRepositories: up to 50 recently opened repository/worktree roots,
+most recent first. Enter opens the selected root, retaining unsaved work in both
+checkouts. `D` forgets an entry without removing files or Git worktrees. Missing
+or moved roots produce an error and retain the current checkout. Each working
+tree keeps its own last view, graph toggle, history size and PR query/state/limit.
+File/hunk and PR-review targets, drafts, search text, Seen marks and credentials
+are never restored. A hunk/PR-file view resumes in Files with fresh data.
+
+The TUI writes state after settled changes and on normal quit to
+`$XDG_CONFIG_HOME/git-wirdo/state.json` (or `$HOME/.config/git-wirdo/state.json`)
+on Unix, and `%APPDATA%\git-wirdo\state.json` on Windows. Override it with
+`--state-file PATH` or `GIT_WIRDO_STATE_FILE`; `--no-state` disables persistence.
+Writes use an OS lock and atomic replacement; concurrently opened clients retain
+each other's repository entries. Changes to the same repository use the last
+writer's settings. Damaged, unsupported or unreadable state is preserved and
+disables saving for that session; save errors remain visible and can be retried.
+
+The current directory (or explicit `--repo`) always determines the checkout.
+`--resume` explicitly opens the last saved root, including from outside a repo;
+it reports missing paths rather than selecting a different checkout.
+`--list-recent` lists saved roots without a TUI or Git mutations. Headless Git
+inspection leaves state untouched. Saved history/PR limits are bounded to 10,000.
 
 GitHub support uses the GitHub CLI (`gh`), including its stored authentication
 and configured repository selection. Install it and authenticate with:

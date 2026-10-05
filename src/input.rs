@@ -17,6 +17,7 @@ pub fn action_for_key(key: KeyEvent) -> Option<Action> {
         return None;
     }
     Some(match key.code {
+        KeyCode::Char('I') => Action::RecentRepositories,
         KeyCode::Char('g') => Action::ToggleGraph,
         KeyCode::Char('F') => Action::ResetCommit,
         KeyCode::Char('+') => Action::LoadHistory,
