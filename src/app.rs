@@ -104,7 +104,7 @@ pub enum PromptKind {
     Comment(u64),
 }
 
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 pub struct Prompt {
     pub kind: PromptKind,
     pub labels: Vec<&'static str>,
@@ -112,7 +112,7 @@ pub struct Prompt {
     pub text: String,
 }
 
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 pub struct App {
     pub repository: Repository,
     pub state: RepoState,

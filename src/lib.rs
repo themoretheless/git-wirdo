@@ -4,4 +4,6 @@ pub mod github;
 pub mod input;
 pub mod model;
 pub mod patch;
+pub mod process;
+pub mod session;
 pub mod ui;

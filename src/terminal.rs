@@ -13,6 +13,7 @@ use ratatui::backend::CrosstermBackend;
 
 use git_wirdo::app::App;
 use git_wirdo::git::Repository;
+use git_wirdo::session::Session;
 use git_wirdo::ui::Ui;
 
 struct TerminalGuard;
@@ -40,7 +41,7 @@ fn restore_terminal() {
 
 pub fn run(repository: Repository) -> Result<()> {
     // Validate/load before touching the terminal; invalid repositories must not break the shell.
-    let mut app = App::new(repository)?;
+    let mut session = Session::new(App::new(repository)?);
     ensure!(
         io::stdin().is_terminal() && io::stdout().is_terminal(),
         "Interactive mode requires a terminal; use --headless for scripts"
@@ -54,12 +55,16 @@ pub fn run(repository: Repository) -> Result<()> {
     let _guard = TerminalGuard::enter()?;
     let mut terminal = Terminal::new(CrosstermBackend::new(io::stdout()))?;
     let mut ui = Ui::default();
-    while app.running {
-        terminal.draw(|frame| ui.draw(frame, &app))?;
+    while session.app.running {
+        session.tick();
+        if !session.app.running {
+            break;
+        }
+        terminal.draw(|frame| ui.draw(frame, &session.app))?;
         if event::poll(Duration::from_millis(100))?
             && let Event::Key(key) = event::read()?
         {
-            app.handle_key(key);
+            session.handle_key(key);
         }
     }
     Ok(())

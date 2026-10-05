@@ -1,6 +1,6 @@
 use std::ffi::{OsStr, OsString};
 use std::fs;
-use std::io::{Read, Write};
+use std::io::Read;
 use std::path::{Path, PathBuf};
 use std::process::{Command, Output, Stdio};
 
@@ -346,7 +346,7 @@ impl Repository {
         let reference = format!("refs/tags/{}", tag.name);
         // Publish the selected object, not an unrelated tag or a later replacement.
         let spec = format!("{}:{reference}", tag.sha);
-        git(&self.root, ["push", "--", remote, &spec])?;
+        git(&self.root, ["push", "--progress", "--", remote, &spec])?;
         Ok(())
     }
 
@@ -355,7 +355,10 @@ impl Repository {
         let reference = format!("refs/tags/{}", tag.name);
         let lease = format!("--force-with-lease={reference}:{}", tag.sha);
         let spec = format!(":{reference}");
-        git(&self.root, ["push", &lease, "--", remote, &spec])?;
+        git(
+            &self.root,
+            ["push", "--progress", &lease, "--", remote, &spec],
+        )?;
         Ok(())
     }
 
@@ -472,7 +475,14 @@ impl Repository {
         git(&self.root, ["show-ref", "--verify", &reference])?;
         git(
             &self.root,
-            ["push", "--set-upstream", "--", remote, &reference],
+            [
+                "push",
+                "--progress",
+                "--set-upstream",
+                "--",
+                remote,
+                &reference,
+            ],
         )?;
         Ok(())
     }
@@ -481,13 +491,16 @@ impl Repository {
         self.ensure_clean()?;
         match strategy {
             "ff-only" => {
-                git(&self.root, ["pull", "--ff-only"])?;
+                git(&self.root, ["pull", "--progress", "--ff-only"])?;
             }
             "merge" => {
-                git(&self.root, ["pull", "--no-rebase", "--ff", "--no-edit"])?;
+                git(
+                    &self.root,
+                    ["pull", "--progress", "--no-rebase", "--ff", "--no-edit"],
+                )?;
             }
             "rebase" => {
-                git(&self.root, ["pull", "--rebase", "--ff"])?;
+                git(&self.root, ["pull", "--progress", "--rebase", "--ff"])?;
             }
             _ => bail!("Choose ff-only, merge or rebase"),
         }
@@ -748,19 +761,11 @@ impl Repository {
             args.push("--reverse");
         }
         args.push("-");
-        let mut child = git_command(&self.root, &args)
-            .stdin(Stdio::piped())
-            .stdout(Stdio::piped())
-            .stderr(Stdio::piped())
-            .spawn()?;
-        let written = child
-            .stdin
-            .take()
-            .context("Git apply stdin unavailable")?
-            .write_all(&hunk.patch);
-        let output = child.wait_with_output()?;
-        checked(output)?;
-        written?;
+        let mut command = git_command(&self.root, &args);
+        checked(crate::process::output_with_input(
+            &mut command,
+            Some(&hunk.patch),
+        )?)?;
         Ok(())
     }
 
@@ -1322,22 +1327,22 @@ impl Repository {
 
     pub fn fetch_remote(&self, name: &str) -> Result<()> {
         self.verify_remote(name)?;
-        git(&self.root, ["fetch", "--", name])?;
+        git(&self.root, ["fetch", "--progress", "--", name])?;
         Ok(())
     }
 
     pub fn fetch(&self) -> Result<()> {
-        git(&self.root, ["fetch", "--all"])?;
+        git(&self.root, ["fetch", "--all", "--progress"])?;
         Ok(())
     }
 
     pub fn pull(&self) -> Result<()> {
-        git(&self.root, ["pull", "--ff-only"])?;
+        git(&self.root, ["pull", "--progress", "--ff-only"])?;
         Ok(())
     }
 
     pub fn push(&self) -> Result<()> {
-        git(&self.root, ["push"])?;
+        git(&self.root, ["push", "--progress"])?;
         Ok(())
     }
 
@@ -1410,8 +1415,7 @@ where
     I: IntoIterator<Item = S>,
     S: AsRef<OsStr>,
 {
-    git_command(path, args)
-        .output()
+    crate::process::output(&mut git_command(path, args))
         .with_context(|| format!("Failed to execute Git in {}", display_path(path)))
 }
 

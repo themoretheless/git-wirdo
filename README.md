@@ -86,8 +86,8 @@ Git actions, not undo commands.
 
 Configure remotes, upstream branches, credentials, signing, and an SSH agent
 before launching the UI. Git credential prompts and interactive Git editors are
-not available inside the TUI. Network operations and hooks are currently
-synchronous and may block the interface while they run.
+not available inside the TUI. Git/network commands and hooks run in a serialized background task. The UI
+shows elapsed time and command diagnostics; Esc cancels, q cancels and exits.
 
 Commit and branch names are entered in the TUI. `E` amends the latest commit
 with a replacement message and staged changes. In Branches, `B` renames the
@@ -110,7 +110,7 @@ for ordinary commits, or enter the parent number for a merge commit. Both action
 require a clean checkout and no unfinished operation. Conflicts are retained in
 Conflicts: resolve and stage, then `e` continues or `x` aborts. `K` remains specific
 to rebase. `F` opens reset; modes and recovery are described below.
-Network operations remain synchronous.
+Background tasks keep the terminal responsive while Git runs.
 
 ## Code layout
 
@@ -213,7 +213,7 @@ Reviews and comments are published when their input is submitted.
 GitHubRepositories lists up to 100 repositories owned by the signed-in user.
 Enter asks for a new clone directory, clones that repository and opens it. This
 list does not include every organization or repository shared with the user.
-Network operations are synchronous and may temporarily block the interface.
+GitHub requests run in the same cancellable background task as Git operations.
 Inline review comments, PR editing and repository creation are not implemented.
 
 Read-only CLI output is also available without an interactive terminal:
@@ -332,3 +332,28 @@ on a branch. `+` loads older entries. `N` creates a new named branch at the
 selected immutable commit ID without switching checkout or touching local edits.
 Existing branches cannot be overwritten. `--list-reflog` lists the first 100 HEAD entries plus up to 100 recovery references without starting the terminal UI. Linked workspaces have separate HEAD
 reflogs; Git's configured reflog expiration still applies.
+
+
+## Background tasks and cancellation
+
+The terminal keeps rendering during Git, GitHub and hook execution. One task at
+a time owns repository operations; additional mutations are rejected rather than
+queued. Diff scrolling remains available while a task is running. The footer
+shows elapsed time and the latest command diagnostic (including Git transfer
+progress when available). Modal text entry remains immediate.
+
+`Esc` requests cancellation. The process group on Unix, or assigned Job Object
+on Windows, covers Git/GitHub and their ordinary descendants. A graceful stop is
+attempted before forced termination. Commands are waited for, and output pipes
+are drained before another mutation is accepted. `q`/`Ctrl-C` while busy cancel
+and wait for cleanup before restoring the terminal and exiting.
+
+Cancellation cannot undo a commit or remote write that already completed. After
+cancellation, repository state is reloaded so partial changes and unfinished
+operations can be inspected. Recovery refresh is also cancellable. A command
+forcibly terminated while holding a Git lock can leave a lock file; investigate
+its owner before removing it. No lock is removed automatically.
+
+Repository validation and initial status loading occur before entering the TUI.
+CLI inspection options remain synchronous. Windows code is checked by cross
+compilation; native Windows cancellation still requires its CI/runtime checks.

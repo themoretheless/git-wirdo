@@ -134,7 +134,7 @@ impl ViewMode {
     }
 }
 
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 pub struct RepoState {
     pub branch: String,
     pub files: Vec<FileEntry>,

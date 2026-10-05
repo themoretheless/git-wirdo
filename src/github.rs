@@ -59,8 +59,7 @@ fn run_program(root: &Path, program: &std::ffi::OsStr, args: &[&str]) -> Result<
     ] {
         command.env_remove(variable);
     }
-    let output = command
-        .output()
+    let output = crate::process::output(&mut command)
         .context("GitHub CLI unavailable; install gh and run gh auth login outside the TUI")?;
     ensure!(
         output.status.success(),

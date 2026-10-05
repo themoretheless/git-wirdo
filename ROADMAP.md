@@ -31,11 +31,14 @@ Implemented foundations:
   and untracked obstruction checks, persistent pre-reset HEAD references, and
   workspace HEAD reflog inspection/recovery into a new branch.
 
+- Serialized background Git/GitHub tasks, streamed diagnostics/elapsed time,
+  mutation exclusion, cancellable recovery refresh, and graceful/forced process
+  cleanup on Unix / Windows Job Objects. Unix hooks and inherited pipes verified.
+
 Remaining acceptance work:
 
-
-- Long Git/network/hook operations must not freeze the TUI. Show progress, prevent
-  conflicting mutations and implement cancellation with correct process cleanup.
+- Complete native Windows runtime verification of background process-tree
+  cancellation (cross compilation alone does not prove behavior).
 - GitHub PR editing, ready-for-review, inline review comments, pagination/filtering
   and selectable merge strategy, without bypassing checks or protection rules.
 - Persist repository/workspace navigation and useful view settings.
