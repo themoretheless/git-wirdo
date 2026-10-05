@@ -262,3 +262,17 @@ fn uncooperative_descendants_are_forced_down_after_the_grace_period() {
     );
     assert!(stopped.elapsed() < Duration::from_secs(3));
 }
+
+#[test]
+fn pr_modal_shortcut_letters_and_multiline_paste_remain_immediate_text() {
+    let r = TestRepo::new();
+    let mut app = App::new(r.open()).unwrap();
+    app.view = git_wirdo::model::ViewMode::PullRequests;
+    app.handle(git_wirdo::app::Action::Commit);
+    let mut session = Session::new(app);
+    session.handle_key(key('L'));
+    session.handle_key(key('M'));
+    session.handle_paste("\nqPcs");
+    assert!(!session.busy() && session.app.running);
+    assert_eq!(session.app.prompt.as_ref().unwrap().text, "LM\nqPcs");
+}

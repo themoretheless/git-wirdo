@@ -164,3 +164,17 @@ fn reflog_inspection_includes_previous_commit_after_reset() {
     let text = String::from_utf8(output.stdout).unwrap();
     assert!(text.contains(&sha) && text.contains("HEAD@{"));
 }
+
+#[test]
+fn help_documents_pr_filter_and_file_inspection_and_invalid_state_is_rejected() {
+    let output = binary().arg("--help").output().unwrap();
+    let help = String::from_utf8(output.stdout).unwrap();
+    for flag in ["--pr-files", "--pr-state", "--pr-search", "--pr-limit"] {
+        assert!(help.contains(flag));
+    }
+    let output = binary()
+        .args(["--list-prs", "--pr-state", "invalid"])
+        .output()
+        .unwrap();
+    assert!(!output.status.success());
+}

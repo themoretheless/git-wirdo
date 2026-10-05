@@ -94,6 +94,7 @@ pub enum ViewMode {
     Tags,
     Hunks,
     Reflog,
+    PrFiles,
 }
 
 impl ViewMode {
@@ -112,6 +113,7 @@ impl ViewMode {
             Self::Tags => 10,
             Self::Hunks => 11,
             Self::Reflog => 12,
+            Self::PrFiles => 13,
         }
     }
 
@@ -129,7 +131,8 @@ impl ViewMode {
             Self::RemoteBranches => Self::Tags,
             Self::Tags => Self::Hunks,
             Self::Hunks => Self::Reflog,
-            Self::Reflog => Self::Files,
+            Self::Reflog => Self::PrFiles,
+            Self::PrFiles => Self::Files,
         }
     }
 }

@@ -70,6 +70,10 @@ pub enum Action {
 
 #[derive(Debug, Clone)]
 pub enum PromptKind {
+    FilterPr,
+    EditPr(crate::github::EditablePr),
+    ReadyPr(crate::github::PullRequest),
+    InlinePr(crate::github::PullRequest, crate::pr_review::PrFile),
     ResetCommit(crate::git::ResetRequest),
     RecoverCommit(String),
     ApplyCommit(String, bool),
@@ -100,7 +104,7 @@ pub enum PromptKind {
     Remove(crate::model::Workspace),
     CreatePr,
     Merge(crate::github::PullRequest),
-    Review(u64, &'static str),
+    Review(crate::github::PullRequest, &'static str),
     Comment(u64),
 }
 
@@ -110,6 +114,7 @@ pub struct Prompt {
     pub labels: Vec<&'static str>,
     pub values: Vec<String>,
     pub text: String,
+    pub defaults: Vec<String>,
 }
 
 #[derive(Debug, Clone)]
@@ -142,6 +147,10 @@ pub struct App {
     pub pull_requests: Vec<crate::github::PullRequest>,
     pub workspace_selection: usize,
     pub pr_selection: usize,
+    pub pr_filter: crate::github::PrFilter,
+    pub review_pr: Option<crate::github::PullRequest>,
+    pub pr_files: Vec<crate::pr_review::PrFile>,
+    pub pr_file_selection: usize,
     pub prompt: Option<Prompt>,
     pub github_repositories: Vec<crate::github::GitHubRepo>,
     pub github_repo_selection: usize,
@@ -191,6 +200,10 @@ impl App {
             pull_requests: Vec::new(),
             workspace_selection: 0,
             pr_selection: 0,
+            pr_filter: crate::github::PrFilter::default(),
+            review_pr: None,
+            pr_files: Vec::new(),
+            pr_file_selection: 0,
             prompt: None,
             github_repositories: Vec::new(),
             github_repo_selection: 0,
@@ -338,8 +351,27 @@ impl App {
                     .workspace_selection
                     .min(self.workspaces.len().saturating_sub(1));
             }
+            ViewMode::PrFiles => {
+                self.pr_files.clear();
+                if let Some(pr) = &self.review_pr {
+                    self.pr_files = crate::pr_review::reviewed_files(self.repository.root(), pr)?;
+                }
+                self.pr_file_selection = self
+                    .pr_file_selection
+                    .min(self.pr_files.len().saturating_sub(1));
+            }
             ViewMode::PullRequests => {
-                self.pull_requests = crate::github::list(self.repository.root())?;
+                let selected = self
+                    .pull_requests
+                    .get(self.pr_selection)
+                    .map(|pr| pr.number);
+                self.pull_requests =
+                    crate::github::list_filtered(self.repository.root(), &self.pr_filter)?;
+                if let Some(index) =
+                    selected.and_then(|n| self.pull_requests.iter().position(|p| p.number == n))
+                {
+                    self.pr_selection = index;
+                }
                 self.pr_selection = self
                     .pr_selection
                     .min(self.pull_requests.len().saturating_sub(1));
@@ -351,6 +383,7 @@ impl App {
 
     pub fn selection(&self) -> usize {
         match self.view {
+            ViewMode::PrFiles => self.pr_file_selection,
             ViewMode::Reflog => self.reflog_selection,
             ViewMode::Hunks => self.hunk_selection,
             ViewMode::Tags => self.tag_selection,
@@ -370,6 +403,7 @@ impl App {
     fn move_selection(&mut self, delta: isize) {
         let file_len = self.displayed_files().len();
         let (selection, len) = match self.view {
+            ViewMode::PrFiles => (&mut self.pr_file_selection, self.pr_files.len()),
             ViewMode::Reflog => (&mut self.reflog_selection, self.reflog.len()),
             ViewMode::Hunks => (&mut self.hunk_selection, self.hunks.len()),
             ViewMode::Tags => (&mut self.tag_selection, self.tags.len()),
@@ -418,6 +452,10 @@ impl App {
 
     fn selected_detail(&self) -> Result<String> {
         match self.view {
+            ViewMode::PrFiles => match (self.review_pr.as_ref(), self.pr_files.get(self.pr_file_selection)) {
+                (Some(pr), Some(file)) => file.detail(pr),
+                _ => Ok("No PR file selected; use i in PullRequests to load reviewed files.".into()),
+            },
             ViewMode::Reflog => match self.reflog.get(self.reflog_selection) {
                 Some(entry) => self.repository.commit_detail(&crate::model::CommitEntry { sha: entry.sha.clone(), short_sha: String::new(), date: String::new(), author: String::new(), subject: entry.subject.clone() }),
                 None => Ok("No reflog entry selected".into()),
@@ -436,7 +474,7 @@ impl App {
             ViewMode::GitHubRepositories => Ok(self.github_repositories.get(self.github_repo_selection).map(|r| format!("{}\n{}\nPrivate: {}\nEnter clone and open", r.name_with_owner, r.url, r.is_private)).unwrap_or_else(|| "No GitHub repositories".into())),
             ViewMode::Workspaces => Ok(self.workspaces.get(self.workspace_selection).map(|w| format!("{}\nBranch: {}\nLocked: {}\nEnter open | N create | D remove", display_path(&w.path), w.branch, w.locked)).unwrap_or_else(|| "No workspace".into())),
             ViewMode::PullRequests => match self.pull_requests.get(self.pr_selection) {
-                Some(pr) => crate::github::detail(self.repository.root(), pr.number),
+                Some(pr) => Ok(format!("{}\n{}", crate::github::detail(self.repository.root(), pr.number)?, crate::pr_review::comments(self.repository.root(), pr.number)?)),
                 None => Ok("No open pull requests. N creates a draft PR; authenticate with gh auth login outside the TUI.".into()),
             },
             ViewMode::Files => match self.displayed_files().get(self.file_selection) {
@@ -496,6 +534,24 @@ impl App {
             .contains_key(&(self.upstream_comparison, file.path.clone()))
     }
 
+    pub fn handle_paste(&mut self, text: &str) {
+        let target = if let Some(prompt) = &mut self.prompt {
+            Some(&mut prompt.text)
+        } else if self.searching {
+            Some(&mut self.search)
+        } else {
+            None
+        };
+        if let Some(target) = target {
+            if target.len().saturating_add(text.len()) > 64 * 1024 {
+                self.message = "Input exceeds 64 KiB; clear or shorten the field".into();
+                self.message_is_error = true;
+                return;
+            }
+            target.push_str(text);
+        }
+    }
+
     pub fn handle_key(&mut self, key: KeyEvent) {
         if key.kind != KeyEventKind::Press {
             return;
@@ -503,6 +559,14 @@ impl App {
         if self.prompt.is_some() {
             if key.modifiers == KeyModifiers::CONTROL && key.code == KeyCode::Char('c') {
                 self.running = false;
+                return;
+            }
+            if key.code == KeyCode::Char('u') && key.modifiers == KeyModifiers::CONTROL {
+                self.prompt.as_mut().unwrap().text.clear();
+                return;
+            }
+            if key.code == KeyCode::Enter && key.modifiers == KeyModifiers::ALT {
+                self.prompt.as_mut().unwrap().text.push('\n');
                 return;
             }
             if key
@@ -523,6 +587,13 @@ impl App {
                 }
                 KeyCode::Enter => {
                     prompt.values.push(std::mem::take(&mut prompt.text));
+                    if prompt.values.len() < prompt.labels.len() {
+                        prompt.text = prompt
+                            .defaults
+                            .get(prompt.values.len())
+                            .cloned()
+                            .unwrap_or_default();
+                    }
                     if prompt.values.len() == prompt.labels.len() {
                         let prompt = self.prompt.take().unwrap();
                         if let Err(error) = self.submit_prompt(prompt) {
@@ -566,6 +637,7 @@ impl App {
             labels,
             values: Vec::new(),
             text: String::new(),
+            defaults: Vec::new(),
         });
     }
 
@@ -577,10 +649,56 @@ impl App {
         Ok(())
     }
 
+    fn start_prefilled_prompt(
+        &mut self,
+        kind: PromptKind,
+        labels: Vec<&'static str>,
+        defaults: Vec<String>,
+    ) {
+        self.start_prompt(kind, labels);
+        if let Some(prompt) = &mut self.prompt {
+            prompt.text = defaults.first().cloned().unwrap_or_default();
+            prompt.defaults = defaults;
+        }
+    }
+
     fn submit_prompt(&mut self, prompt: Prompt) -> Result<()> {
         use anyhow::ensure;
         let v = prompt.values;
         let output = match prompt.kind {
+            PromptKind::FilterPr => {
+                let filter = crate::github::PrFilter {
+                    state: v[0].trim().into(),
+                    search: v[1].clone(),
+                    limit: 100,
+                };
+                filter.validate()?;
+                let prs = crate::github::list_filtered(self.repository.root(), &filter)?;
+                self.pr_filter = filter;
+                self.pull_requests = prs;
+                self.pr_selection = 0;
+                "Updated PR filter".into()
+            }
+            PromptKind::EditPr(expected) => {
+                crate::github::edit(self.repository.root(), &expected, &v[0], &v[1], &v[2])?
+            }
+            PromptKind::ReadyPr(pr) => {
+                ensure!(
+                    v[0] == pr.number.to_string(),
+                    "Draft transition cancelled: confirm PR number"
+                );
+                crate::github::set_ready(self.repository.root(), &pr)?
+            }
+            PromptKind::InlinePr(pr, file) => crate::pr_review::inline_comment(
+                self.repository.root(),
+                &pr,
+                &file,
+                v[0].trim(),
+                v[1].trim()
+                    .parse()
+                    .context("Enter a positive diff line number")?,
+                &v[2],
+            )?,
             PromptKind::RecoverCommit(sha) => {
                 self.repository.recover_commit(&sha, &v[0])?;
                 format!("Recovered {} into branch {}; checkout unchanged", sha, v[0])
@@ -794,10 +912,14 @@ impl App {
                     v[0] == pr.number.to_string(),
                     "Merge cancelled: enter the selected PR number"
                 );
-                crate::github::merge(self.repository.root(), &pr)?
+                crate::github::merge_with_method(
+                    self.repository.root(),
+                    &pr,
+                    crate::github::MergeMethod::parse(v[1].trim())?,
+                )?
             }
-            PromptKind::Review(number, verdict) => {
-                crate::github::review(self.repository.root(), number, verdict, &v[0])?
+            PromptKind::Review(pr, verdict) => {
+                crate::github::review_selected(self.repository.root(), &pr, verdict, &v[0])?
             }
             PromptKind::Comment(number) => {
                 crate::github::comment(self.repository.root(), number, &v[0])?
@@ -877,6 +999,95 @@ impl App {
 
     fn apply(&mut self, action: Action) -> Result<()> {
         match action {
+            Action::LoadHistory if self.view == ViewMode::PullRequests => {
+                self.pr_filter.limit = self.pr_filter.limit.saturating_add(100);
+                self.load_extra()?;
+                self.refresh_detail();
+                self.message = format!(
+                    "Loaded {} PRs (limit {}); search may be capped by GitHub, refine U filter",
+                    self.pull_requests.len(),
+                    self.pr_filter.limit
+                );
+                self.message_is_error = false;
+            }
+            Action::SetUpstream if self.view == ViewMode::PullRequests => self
+                .start_prefilled_prompt(
+                    PromptKind::FilterPr,
+                    vec![
+                        "PR state: open, closed, merged, all",
+                        "GitHub search query (blank = none)",
+                    ],
+                    vec![self.pr_filter.state.clone(), self.pr_filter.search.clone()],
+                ),
+            Action::EditRemote if self.view == ViewMode::PullRequests => {
+                if let Some(pr) = self.pull_requests.get(self.pr_selection) {
+                    let expected = crate::github::editable(self.repository.root(), pr.number)?;
+                    self.message = format!("Edit PR #{}: {}", pr.number, pr.url);
+                    let defaults = vec![
+                        expected.title.clone(),
+                        expected.body.clone(),
+                        expected.base_ref_name.clone(),
+                    ];
+                    self.start_prefilled_prompt(
+                        PromptKind::EditPr(expected),
+                        vec![
+                            "PR title",
+                            "PR body (Ctrl-U clears; Alt-Enter newline; paste supported)",
+                            "Base branch",
+                        ],
+                        defaults,
+                    );
+                }
+            }
+            Action::PopStash if self.view == ViewMode::PullRequests => {
+                if let Some(pr) = self.pull_requests.get(self.pr_selection).cloned() {
+                    self.message = format!(
+                        "PR #{} {}: {}",
+                        pr.number,
+                        if pr.is_draft {
+                            "draft -> ready"
+                        } else {
+                            "ready -> draft"
+                        },
+                        pr.url
+                    );
+                    self.start_prompt(
+                        PromptKind::ReadyPr(pr),
+                        vec!["Type selected PR number to confirm draft transition"],
+                    );
+                }
+            }
+            Action::OpenHunks if self.view == ViewMode::PullRequests => {
+                if let Some(pr) = self.pull_requests.get(self.pr_selection).cloned() {
+                    self.review_pr = Some(pr);
+                    self.pr_files.clear();
+                    self.pr_file_selection = 0;
+                    self.view = ViewMode::PrFiles;
+                    self.load_extra()?;
+                    self.refresh_detail();
+                }
+            }
+            Action::CommentPr if self.view == ViewMode::PrFiles => {
+                if let (Some(pr), Some(file)) = (
+                    self.review_pr.as_ref(),
+                    self.pr_files.get(self.pr_file_selection),
+                ) {
+                    self.message = format!(
+                        "Comment PR #{} {} at reviewed head {}",
+                        pr.number,
+                        file.filename.escape_debug(),
+                        pr.head_ref_oid
+                    );
+                    self.start_prompt(
+                        PromptKind::InlinePr(pr.clone(), file.clone()),
+                        vec![
+                            "Diff side: LEFT or RIGHT",
+                            "Displayed old/new line number",
+                            "Inline comment body",
+                        ],
+                    );
+                }
+            }
             Action::ToggleGraph if self.view == ViewMode::History => {
                 self.graph_visible = !self.graph_visible;
                 self.load_extra()?;
@@ -1140,14 +1351,17 @@ impl App {
                     match action {
                         Action::MergePr => self.start_prompt(
                             PromptKind::Merge(pr),
-                            vec!["Confirm squash merge: enter PR number"],
+                            vec![
+                                "Confirm merge: enter PR number",
+                                "Merge method: merge, squash, rebase",
+                            ],
                         ),
                         Action::ApprovePr => self.start_prompt(
-                            PromptKind::Review(pr.number, "--approve"),
+                            PromptKind::Review(pr, "--approve"),
                             vec!["Approve review body"],
                         ),
                         Action::RequestChanges => self.start_prompt(
-                            PromptKind::Review(pr.number, "--request-changes"),
+                            PromptKind::Review(pr, "--request-changes"),
                             vec!["Requested changes"],
                         ),
                         _ => self.start_prompt(PromptKind::Comment(pr.number), vec!["PR comment"]),

@@ -1,5 +1,5 @@
 use anyhow::{Context, Result, ensure};
-use serde::Deserialize;
+use serde::{Deserialize, Serialize};
 use std::path::Path;
 use std::process::{Command, Stdio};
 
@@ -17,10 +17,20 @@ pub struct PullRequest {
 
 #[cfg(test)]
 thread_local! {
+    static RESPONSES: std::cell::RefCell<std::collections::VecDeque<String>> = const { std::cell::RefCell::new(std::collections::VecDeque::new()) };
+    static PAYLOADS: std::cell::RefCell<Vec<Vec<u8>>> = const { std::cell::RefCell::new(Vec::new()) };
     static CAPTURE: std::cell::RefCell<Option<Vec<Vec<String>>>> = const { std::cell::RefCell::new(None) };
 }
 
 pub fn run(root: &Path, args: &[&str]) -> Result<String> {
+    run_input(root, args, None)
+}
+
+pub(crate) fn run_json(root: &Path, args: &[&str], body: &[u8]) -> Result<String> {
+    run_input(root, args, Some(body))
+}
+
+fn run_input(root: &Path, args: &[&str], input: Option<&[u8]>) -> Result<String> {
     #[cfg(test)]
     if CAPTURE.with(|capture| {
         if let Some(calls) = capture.borrow_mut().as_mut() {
@@ -30,13 +40,30 @@ pub fn run(root: &Path, args: &[&str]) -> Result<String> {
             false
         }
     }) {
-        return Ok("fixture result".into());
+        if let Some(input) = input {
+            PAYLOADS.with(|p| p.borrow_mut().push(input.to_vec()));
+        }
+        return Ok(RESPONSES.with(|r| {
+            r.borrow_mut()
+                .pop_front()
+                .unwrap_or_else(|| "fixture result".into())
+        }));
     }
 
-    run_program(root, std::ffi::OsStr::new("gh"), args)
+    run_program_input(root, std::ffi::OsStr::new("gh"), args, input)
 }
 
+#[cfg(all(test, unix))]
 fn run_program(root: &Path, program: &std::ffi::OsStr, args: &[&str]) -> Result<String> {
+    run_program_input(root, program, args, None)
+}
+
+fn run_program_input(
+    root: &Path,
+    program: &std::ffi::OsStr,
+    args: &[&str],
+    input: Option<&[u8]>,
+) -> Result<String> {
     let mut command = Command::new(program);
     command
         .args(args)
@@ -59,7 +86,7 @@ fn run_program(root: &Path, program: &std::ffi::OsStr, args: &[&str]) -> Result<
     ] {
         command.env_remove(variable);
     }
-    let output = crate::process::output(&mut command)
+    let output = crate::process::output_with_input(&mut command, input)
         .context("GitHub CLI unavailable; install gh and run gh auth login outside the TUI")?;
     ensure!(
         output.status.success(),
@@ -79,21 +106,64 @@ fn run_program(root: &Path, program: &std::ffi::OsStr, args: &[&str]) -> Result<
     .into_owned())
 }
 
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct PrFilter {
+    pub state: String,
+    pub search: String,
+    pub limit: usize,
+}
+impl Default for PrFilter {
+    fn default() -> Self {
+        Self {
+            state: "open".into(),
+            search: String::new(),
+            limit: 100,
+        }
+    }
+}
+impl PrFilter {
+    pub fn validate(&self) -> Result<()> {
+        ensure!(
+            ["open", "closed", "merged", "all"].contains(&self.state.as_str()),
+            "PR state must be open, closed, merged or all"
+        );
+        ensure!(self.limit > 0, "PR limit must be positive");
+        Ok(())
+    }
+}
 pub fn list(root: &Path) -> Result<Vec<PullRequest>> {
+    list_filtered(root, &PrFilter::default())
+}
+pub fn list_filtered(root: &Path, filter: &PrFilter) -> Result<Vec<PullRequest>> {
+    filter.validate()?;
+    let limit = filter.limit.to_string();
+    let mut args = vec![
+        "pr",
+        "list",
+        "--state",
+        &filter.state,
+        "--limit",
+        &limit,
+        "--json",
+        "number,title,url,headRefName,baseRefName,headRefOid,isDraft",
+    ];
+    if !filter.search.is_empty() {
+        args.extend(["--search", &filter.search]);
+    }
+    serde_json::from_str(&run(root, &args)?).context("Invalid PR response from gh")
+}
+pub fn get_pr(root: &Path, number: u64) -> Result<PullRequest> {
     serde_json::from_str(&run(
         root,
         &[
             "pr",
-            "list",
-            "--state",
-            "open",
-            "--limit",
-            "100",
+            "view",
+            &number.to_string(),
             "--json",
             "number,title,url,headRefName,baseRefName,headRefOid,isDraft",
         ],
     )?)
-    .context("Invalid PR response from gh")
+    .context("Invalid selected PR response")
 }
 
 pub fn detail(root: &Path, number: u64) -> Result<String> {
@@ -177,17 +247,133 @@ pub fn create(root: &Path, title: &str, body: &str, base: &str, head: &str) -> R
     )
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum MergeMethod {
+    Merge,
+    Squash,
+    Rebase,
+}
+impl MergeMethod {
+    pub fn parse(value: &str) -> Result<Self> {
+        match value {
+            "merge" => Ok(Self::Merge),
+            "squash" => Ok(Self::Squash),
+            "rebase" => Ok(Self::Rebase),
+            _ => anyhow::bail!("Choose merge, squash or rebase"),
+        }
+    }
+    fn flag(self) -> &'static str {
+        match self {
+            Self::Merge => "--merge",
+            Self::Squash => "--squash",
+            Self::Rebase => "--rebase",
+        }
+    }
+}
 pub fn merge(root: &Path, pr: &PullRequest) -> Result<String> {
+    merge_with_method(root, pr, MergeMethod::Squash)
+}
+pub fn merge_with_method(root: &Path, pr: &PullRequest, method: MergeMethod) -> Result<String> {
     run(
         root,
         &[
             "pr",
             "merge",
             &pr.number.to_string(),
-            "--squash",
+            method.flag(),
             "--match-head-commit",
             &pr.head_ref_oid,
         ],
+    )
+}
+#[derive(Debug, Clone, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "camelCase")]
+pub struct EditablePr {
+    pub number: u64,
+    pub title: String,
+    pub body: String,
+    pub base_ref_name: String,
+}
+pub fn editable(root: &Path, number: u64) -> Result<EditablePr> {
+    serde_json::from_str(&run(
+        root,
+        &[
+            "pr",
+            "view",
+            &number.to_string(),
+            "--json",
+            "number,title,body,baseRefName",
+        ],
+    )?)
+    .context("Invalid PR edit response")
+}
+pub fn edit(
+    root: &Path,
+    expected: &EditablePr,
+    title: &str,
+    body: &str,
+    base: &str,
+) -> Result<String> {
+    ensure!(
+        !title.trim().is_empty() && !base.trim().is_empty(),
+        "PR title and base are required"
+    );
+    ensure!(
+        &editable(root, expected.number)? == expected,
+        "PR metadata changed; reopen the edit form"
+    );
+    run(
+        root,
+        &[
+            "pr",
+            "edit",
+            &expected.number.to_string(),
+            "--title",
+            title,
+            "--body",
+            body,
+            "--base",
+            base,
+        ],
+    )
+}
+pub fn set_ready(root: &Path, pr: &PullRequest) -> Result<String> {
+    let current = get_pr(root, pr.number)?;
+    ensure!(
+        current.head_ref_oid == pr.head_ref_oid && current.is_draft == pr.is_draft,
+        "PR head or draft state changed; refresh before confirming"
+    );
+    let number = pr.number.to_string();
+    let mut args = vec!["pr", "ready", &number];
+    if !pr.is_draft {
+        args.push("--undo");
+    }
+    run(root, &args)
+}
+
+pub fn review_selected(root: &Path, pr: &PullRequest, verdict: &str, body: &str) -> Result<String> {
+    let event = match verdict {
+        "--approve" => "APPROVE",
+        "--request-changes" => "REQUEST_CHANGES",
+        "--comment" => "COMMENT",
+        _ => anyhow::bail!("Invalid review verdict"),
+    };
+    ensure!(
+        event == "APPROVE" || !body.trim().is_empty(),
+        "Review body is required for comments or requested changes"
+    );
+    ensure!(
+        get_pr(root, pr.number)?.head_ref_oid == pr.head_ref_oid,
+        "PR head changed; refresh and review before submitting"
+    );
+    let endpoint = format!("repos/{{owner}}/{{repo}}/pulls/{}/reviews", pr.number);
+    let payload = serde_json::to_vec(
+        &serde_json::json!({"commit_id":pr.head_ref_oid,"event":event,"body":body}),
+    )?;
+    run_json(
+        root,
+        &["api", &endpoint, "--method", "POST", "--input", "-"],
+        &payload,
     )
 }
 
@@ -242,8 +428,235 @@ pub fn clone_repository(root: &Path, name: &str, destination: &Path) -> Result<S
 }
 
 #[cfg(test)]
+pub(crate) struct Mock;
+#[cfg(test)]
+impl Mock {
+    pub(crate) fn new(responses: impl IntoIterator<Item = String>) -> Self {
+        CAPTURE.with(|c| *c.borrow_mut() = Some(Vec::new()));
+        RESPONSES.with(|r| *r.borrow_mut() = responses.into_iter().collect());
+        PAYLOADS.with(|p| p.borrow_mut().clear());
+        Self
+    }
+    pub(crate) fn calls(&self) -> Vec<Vec<String>> {
+        CAPTURE.with(|c| c.borrow().as_ref().unwrap().clone())
+    }
+    pub(crate) fn payloads(&self) -> Vec<Vec<u8>> {
+        PAYLOADS.with(|p| p.borrow().clone())
+    }
+}
+#[cfg(test)]
+impl Drop for Mock {
+    fn drop(&mut self) {
+        CAPTURE.with(|c| *c.borrow_mut() = None);
+        RESPONSES.with(|r| r.borrow_mut().clear());
+        PAYLOADS.with(|p| p.borrow_mut().clear());
+    }
+}
+
+#[cfg(test)]
 mod tests {
     use super::*;
+    fn press(app: &mut crate::app::App, text: &str) {
+        for c in text.chars() {
+            app.handle_key(crossterm::event::KeyEvent::new(
+                crossterm::event::KeyCode::Char(c),
+                crossterm::event::KeyModifiers::NONE,
+            ));
+        }
+        app.handle_key(crossterm::event::KeyEvent::new(
+            crossterm::event::KeyCode::Enter,
+            crossterm::event::KeyModifiers::NONE,
+        ));
+    }
+    fn selected_app() -> (crate::test_support::TestRepo, crate::app::App) {
+        let repo = crate::test_support::TestRepo::new();
+        let mut app = crate::app::App::new(repo.open()).unwrap();
+        app.view = crate::model::ViewMode::PullRequests;
+        app.pull_requests.push(PullRequest {
+            number: 7,
+            title: "Title".into(),
+            url: "url".into(),
+            head_ref_name: "topic".into(),
+            base_ref_name: "main".into(),
+            head_ref_oid: "a".repeat(40),
+            is_draft: true,
+        });
+        (repo, app)
+    }
+    #[test]
+    fn tui_edit_prefills_current_fields_and_submits_multiline_body_without_shell_interpretation() {
+        use crossterm::event::{KeyCode, KeyEvent, KeyModifiers};
+        let (_repo, mut app) = selected_app();
+        let metadata =
+            serde_json::json!({"number":7,"title":"Title","body":"Old\nbody","baseRefName":"main"})
+                .to_string();
+        let mock = Mock::new([metadata.clone(), metadata, "edited".into(), "[]".into()]);
+        app.handle(crate::app::Action::EditRemote);
+        assert_eq!(app.prompt.as_ref().unwrap().text, "Title");
+        app.handle_key(KeyEvent::new(KeyCode::Enter, KeyModifiers::NONE));
+        assert_eq!(app.prompt.as_ref().unwrap().text, "Old\nbody");
+        app.handle_key(KeyEvent::new(KeyCode::Char('u'), KeyModifiers::CONTROL));
+        app.handle_paste("new literal $(not a command)\nsecond line");
+        app.handle_key(KeyEvent::new(KeyCode::Enter, KeyModifiers::ALT));
+        app.handle_paste("third line");
+        app.handle_key(KeyEvent::new(KeyCode::Enter, KeyModifiers::NONE));
+        assert_eq!(app.prompt.as_ref().unwrap().text, "main");
+        app.handle_key(KeyEvent::new(KeyCode::Enter, KeyModifiers::NONE));
+        assert!(
+            !app.message_is_error && app.prompt.is_none(),
+            "{}",
+            app.message
+        );
+        assert!(
+            mock.calls()[2]
+                .contains(&"new literal $(not a command)\nsecond line\nthird line".into())
+        );
+    }
+    #[test]
+    fn tui_merge_requires_number_and_method_and_preserves_head_pin() {
+        let (_repo, mut app) = selected_app();
+        let mock = Mock::new(["merged".into(), "[]".into()]);
+        app.handle(crate::app::Action::MergePr);
+        press(&mut app, "7");
+        assert!(mock.calls().is_empty());
+        assert!(app.prompt.as_ref().unwrap().labels[1].contains("Merge method"));
+        press(&mut app, "rebase");
+        assert!(!app.message_is_error, "{}", app.message);
+        assert_eq!(&mock.calls()[0][3], "--rebase");
+        assert!(mock.calls()[0].contains(&"a".repeat(40)));
+    }
+    #[test]
+    fn invalid_filter_submission_keeps_previous_list_and_never_calls_provider() {
+        let (_repo, mut app) = selected_app();
+        let mock = Mock::new([]);
+        app.handle(crate::app::Action::SetUpstream);
+        app.handle_key(crossterm::event::KeyEvent::new(
+            crossterm::event::KeyCode::Char('u'),
+            crossterm::event::KeyModifiers::CONTROL,
+        ));
+        press(&mut app, "invalid");
+        press(&mut app, "query");
+        assert!(
+            app.message_is_error
+                && app.pr_filter.state == "open"
+                && app.pull_requests[0].number == 7
+        );
+        assert!(mock.calls().is_empty());
+    }
+
+    #[test]
+    fn selected_approval_pins_the_reviewed_commit_and_rejects_changed_head() {
+        let (_repo, app) = selected_app();
+        let pr = app.pull_requests[0].clone();
+        let json = serde_json::json!({"number":7,"title":"Title","url":"url","headRefName":"topic","baseRefName":"main","headRefOid":pr.head_ref_oid,"isDraft":true});
+        let mock = Mock::new([json.to_string(), "approved".into()]);
+        review_selected(Path::new("."), &pr, "--approve", "").unwrap();
+        let payload: serde_json::Value = serde_json::from_slice(&mock.payloads()[0]).unwrap();
+        assert_eq!(payload["event"], "APPROVE");
+        assert_eq!(payload["commit_id"], pr.head_ref_oid);
+        drop(mock);
+        let mut changed = json;
+        changed["headRefOid"] = serde_json::json!("b".repeat(40));
+        let mock = Mock::new([changed.to_string()]);
+        assert!(review_selected(Path::new("."), &pr, "--approve", "").is_err());
+        assert_eq!(mock.calls().len(), 1);
+        assert!(mock.payloads().is_empty());
+    }
+
+    #[test]
+    fn filters_are_validated_and_incremental_limits_are_sent_to_gh() {
+        let mock = Mock::new(["[]".into()]);
+        let f = PrFilter {
+            state: "merged".into(),
+            search: "author:@me label:bug".into(),
+            limit: 250,
+        };
+        list_filtered(Path::new("."), &f).unwrap();
+        assert!(mock.calls()[0].contains(&"250".into()) && mock.calls()[0].contains(&f.search));
+        let mut invalid = f;
+        invalid.state = "--admin".into();
+        assert!(list_filtered(Path::new("."), &invalid).is_err());
+        assert_eq!(mock.calls().len(), 1);
+    }
+    #[test]
+    fn all_merge_methods_match_the_reviewed_head_without_admin_bypass() {
+        let mock = Mock::new([]);
+        let pr = PullRequest {
+            number: 7,
+            title: "Title".into(),
+            url: "url".into(),
+            head_ref_name: "topic".into(),
+            base_ref_name: "main".into(),
+            head_ref_oid: "a".repeat(40),
+            is_draft: false,
+        };
+        for (name, flag) in [
+            ("merge", "--merge"),
+            ("squash", "--squash"),
+            ("rebase", "--rebase"),
+        ] {
+            merge_with_method(Path::new("."), &pr, MergeMethod::parse(name).unwrap()).unwrap();
+            let call = mock.calls().last().unwrap().clone();
+            assert!(call.contains(&flag.into()) && call.contains(&pr.head_ref_oid));
+            assert!(!call.contains(&"--admin".into()));
+        }
+        assert!(MergeMethod::parse("--admin").is_err());
+    }
+    #[test]
+    fn editing_checks_current_metadata_and_preserves_multiline_literal_body() {
+        let expected = EditablePr {
+            number: 7,
+            title: "Original".into(),
+            body: "Old".into(),
+            base_ref_name: "main".into(),
+        };
+        let json =
+            serde_json::json!({"number":7,"title":"Original","body":"Old","baseRefName":"main"})
+                .to_string();
+        let mock = Mock::new([json, "edited".into()]);
+        let body = "line one\n$(literal) \"quote\"";
+        edit(Path::new("."), &expected, "Replacement", body, "develop").unwrap();
+        assert_eq!(
+            mock.calls()[1],
+            [
+                "pr",
+                "edit",
+                "7",
+                "--title",
+                "Replacement",
+                "--body",
+                body,
+                "--base",
+                "develop"
+            ]
+        );
+        drop(mock);
+        let mock = Mock::new([
+            serde_json::json!({"number":7,"title":"External","body":"Old","baseRefName":"main"})
+                .to_string(),
+        ]);
+        assert!(edit(Path::new("."), &expected, "Replacement", body, "main").is_err());
+        assert_eq!(mock.calls().len(), 1);
+    }
+    #[test]
+    fn draft_transition_checks_head_and_state_and_supports_undo() {
+        for draft in [true, false] {
+            let pr = PullRequest {
+                number: 7,
+                title: "Title".into(),
+                url: "url".into(),
+                head_ref_name: "topic".into(),
+                base_ref_name: "main".into(),
+                head_ref_oid: "a".repeat(40),
+                is_draft: draft,
+            };
+            let json=serde_json::json!({"number":7,"title":"Title","url":"url","headRefName":"topic","baseRefName":"main","headRefOid":pr.head_ref_oid,"isDraft":draft}).to_string();
+            let mock = Mock::new([json, "ready".into()]);
+            set_ready(Path::new("."), &pr).unwrap();
+            assert_eq!(mock.calls()[1].contains(&"--undo".into()), !draft);
+        }
+    }
+
     #[test]
     fn publishing_is_explicit_and_merge_matches_reviewed_head() {
         let root = Path::new(".");

@@ -127,6 +127,7 @@ fn pr_checkout_refuses_dirty_work_and_merge_requires_selected_number() {
     );
     app.handle(Action::MergePr);
     type_text(&mut app, "1");
+    type_text(&mut app, "squash");
     assert!(app.message.contains("Merge cancelled"));
     app.handle(Action::CommentPr);
     app.handle_key(KeyEvent::new(KeyCode::Esc, KeyModifiers::NONE));

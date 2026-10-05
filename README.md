@@ -161,7 +161,7 @@ Search is case-sensitive: loaded commit metadata in History, selected details in
 ## Workspaces and GitHub
 
 Tab cycles Files → History → Branches → Conflicts → Workspaces → PullRequests →
-GitHubRepositories → Stashes → Remotes → RemoteBranches → Tags → Hunks → Reflog. `O` opens another local repository by path; the previous
+GitHubRepositories → Stashes → Remotes → RemoteBranches → Tags → Hunks → Reflog → PrFiles. `O` opens another local repository by path; the previous
 checkout and its files remain on disk. Relative paths are resolved from the
 current repository root. Workspaces are Git linked worktrees, not cloud sessions. Listing uses the
 [NUL-delimited porcelain format](https://git-scm.com/docs/git-worktree/2.36.0),
@@ -188,8 +188,11 @@ view. With multiple remotes, configure `gh repo set-default` outside the TUI.
 Inherited GH_REPO and repository-local Git environment variables are ignored so
 commands address the checkout opened in Git Wirdo.
 
-PullRequests shows up to 100 open PRs. Selecting a PR loads its description,
-checks, review decision, mergeability, reviews and conversation comments.
+PullRequests starts with 100 open PRs. `+` requests another 100; `U` filters
+open/closed/merged/all states and accepts a GitHub search query (such as
+`author:@me label:bug`). Search/API result limits still apply. Selection follows
+PR number across refresh. Details include checks, review decisions, mergeability,
+reviews, conversation and inline comments, including outdated locations.
 
 | Key | PR action |
 | --- | --- |
@@ -199,22 +202,39 @@ checks, review decision, mergeability, reviews and conversation comments.
 | `A` | Submit an approval with the entered review body |
 | `R` | Submit a request-changes review with the entered body |
 | `C` | Post a conversation comment with the entered body |
-| `M` | Squash merge after typing the selected PR number |
+| `M` | Confirm PR number, then choose merge / squash / rebase |
+| `L` | Edit prefilled title, multiline body and base branch |
+| `T` | Confirm draft ↔ ready transition with the PR number |
+| `i` | Open files with old/new line numbers and inline commenting |
 
 Each input uses Enter to advance and Escape to cancel; ordinary shortcut letters
-are text while a prompt is open. Bodies currently use a single line. Creation
+are text while a prompt is open. `Ctrl-U` clears the current field; `Alt-Enter`
+inserts a newline. Bracketed paste is accepted as text without executing shortcuts
+(64 KiB per field). Edit fields are prefilled; an empty body explicitly clears it. Creation
 requires a clean checkout and a head branch already published to GitHub; push it
 first with your upstream configured. Creation does not implicitly push or fork.
 Merge requests match the head SHA shown by the loaded PR list, so changes pushed
 since refresh require refreshing before retrying. GitHub's checks, permissions
 and protection rules apply; no admin bypass or branch deletion is requested.
-Reviews and comments are published when their input is submitted.
+Approvals and request-changes reviews use the selected immutable head commit and
+reject a changed head before publishing. Edit forms reject changed metadata;
+draft transitions recheck head and draft state. Reviews and comments are published
+when their input is submitted.
+
+In PrFiles, `j/k` selects a changed file; `C` asks for LEFT/RIGHT, a displayed old/new
+line number and body. Files and inline comments follow all API pages. The chosen
+head and exact file patch are rechecked before sending structured JSON; comments
+are attached to that reviewed commit, including renamed/control-character paths.
+Binary, missing, malformed or truncated patches cannot provide line targets.
+GitHub's own file/patch limits apply; no line location is fabricated.
 
 GitHubRepositories lists up to 100 repositories owned by the signed-in user.
 Enter asks for a new clone directory, clones that repository and opens it. This
 list does not include every organization or repository shared with the user.
 GitHub requests run in the same cancellable background task as Git operations.
-Inline review comments, PR editing and repository creation are not implemented.
+Repository creation is not implemented. CLI `--pr-files NUMBER` inspects the
+line-numbered patches; `--list-prs` accepts `--pr-state`, `--pr-search`, and
+`--pr-limit`. CLI `--pr NUMBER` includes paginated inline review comments.
 
 Read-only CLI output is also available without an interactive terminal:
 

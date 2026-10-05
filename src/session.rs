@@ -132,12 +132,27 @@ impl Session {
         });
         self.tick();
     }
+    pub fn handle_paste(&mut self, text: &str) {
+        self.tick();
+        if self.job.is_none() && self.app.running {
+            self.app.handle_paste(text);
+        }
+    }
     fn local_key(&self, key: KeyEvent) -> bool {
+        if self.app.prompt.is_none()
+            && !self.app.searching
+            && self.app.view == ViewMode::PullRequests
+            && action_for_key(key) == Some(Action::EditRemote)
+        {
+            return false;
+        }
         if action_for_key(key) == Some(Action::Quit) {
             return true;
         }
         if let Some(prompt) = &self.app.prompt {
-            return key.code != KeyCode::Enter || prompt.values.len() + 1 < prompt.labels.len();
+            return key.modifiers == crossterm::event::KeyModifiers::ALT
+                || key.code != KeyCode::Enter
+                || prompt.values.len() + 1 < prompt.labels.len();
         }
         if self.app.searching {
             return key.code != KeyCode::Enter;

@@ -32,6 +32,18 @@ struct Cli {
     /// List open GitHub pull requests without starting the TUI.
     #[arg(long, group = "inspection")]
     list_prs: bool,
+    /// State used with --list-prs.
+    #[arg(long, default_value = "open", value_parser = ["open", "closed", "merged", "all"])]
+    pr_state: String,
+    /// GitHub search query used with --list-prs.
+    #[arg(long, default_value = "")]
+    pr_search: String,
+    /// Maximum PR list size (increase to load more).
+    #[arg(long, default_value_t = 100)]
+    pr_limit: usize,
+    /// Inspect a PR's files and line-numbered patches.
+    #[arg(long, group = "inspection")]
+    pr_files: Option<u64>,
     /// List repositories belonging to the authenticated GitHub user.
     #[arg(long, group = "inspection")]
     list_github_repos: bool,
@@ -103,8 +115,20 @@ fn main() -> Result<()> {
         }
         return Ok(());
     }
+    if let Some(number) = cli.pr_files {
+        let pr = git_wirdo::github::get_pr(repository.root(), number)?;
+        for file in git_wirdo::pr_review::reviewed_files(repository.root(), &pr)? {
+            println!("{}", file.detail(&pr)?);
+        }
+        return Ok(());
+    }
     if cli.list_prs {
-        for pr in git_wirdo::github::list(repository.root())? {
+        let filter = git_wirdo::github::PrFilter {
+            state: cli.pr_state,
+            search: cli.pr_search,
+            limit: cli.pr_limit,
+        };
+        for pr in git_wirdo::github::list_filtered(repository.root(), &filter)? {
             println!("#{} {} {}", pr.number, pr.title.escape_debug(), pr.url);
         }
         return Ok(());
@@ -116,7 +140,11 @@ fn main() -> Result<()> {
         return Ok(());
     }
     if let Some(number) = cli.pr {
-        println!("{}", git_wirdo::github::detail(repository.root(), number)?);
+        println!(
+            "{}\n{}",
+            git_wirdo::github::detail(repository.root(), number)?,
+            git_wirdo::pr_review::comments(repository.root(), number)?
+        );
         return Ok(());
     }
     if cli.headless {

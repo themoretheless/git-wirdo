@@ -35,12 +35,16 @@ Implemented foundations:
   mutation exclusion, cancellable recovery refresh, and graceful/forced process
   cleanup on Unix / Windows Job Objects. Unix hooks and inherited pipes verified.
 
+- Prefilled/multiline PR editing, guarded draft/ready transitions, PR query/state
+  filtering and incremental lists, selectable merge method, head-pinned reviews,
+  paginated file/inline-comment inspection and validated inline comment publication.
+  Remote mutation requests are fixture-tested; no live review/comment was posted.
+
 Remaining acceptance work:
 
 - Complete native Windows runtime verification of background process-tree
   cancellation (cross compilation alone does not prove behavior).
-- GitHub PR editing, ready-for-review, inline review comments, pagination/filtering
-  and selectable merge strategy, without bypassing checks or protection rules.
+
 - Persist repository/workspace navigation and useful view settings.
 - End-to-end TUI verification for each primary workflow; stable CI checks and
   platform-specific filename/terminal behavior remain regression requirements.

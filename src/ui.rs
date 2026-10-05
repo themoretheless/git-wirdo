@@ -9,7 +9,7 @@ use crate::model::{ViewMode, display_path};
 
 #[derive(Default)]
 pub struct Ui {
-    lists: [ListState; 13],
+    lists: [ListState; 14],
 }
 
 impl Ui {
@@ -105,8 +105,9 @@ impl Ui {
             ViewMode::Branches => "enter switch | b new | B rename | D delete | m merge | z rebase",
             ViewMode::GitHubRepositories => "enter clone | G auth status | O open local repository",
             ViewMode::Workspaces => "enter open | N create | D remove | O open repository",
+            ViewMode::PrFiles => "j/k file | C line comment | PgUp/PgDn patch | r refresh",
             ViewMode::PullRequests => {
-                "enter checkout | N draft | V diff | M merge | A approve | R changes | C comment"
+                "i files | U filter | + more | L edit | T draft/ready | M merge | A/R review | C comment | V diff"
             }
             ViewMode::Conflicts => "o ours | t theirs | a resolved | e continue | K skip | x abort",
         };
@@ -116,7 +117,7 @@ impl Ui {
             Style::default()
         };
         let footer = Paragraph::new(vec![
-            Line::from(if let Some(prompt) = &app.prompt { format!("{}: {}_ (Enter next, Esc cancel)", prompt.labels[prompt.values.len()], safe_text(&prompt.text)) } else if app.searching { format!("Find: {}_ (Enter search, Esc cancel)", safe_text(&app.search)) } else { "tab view | j/k select | PgUp/PgDn diff | / find | n next | d base | v seen | r refresh | q quit".into() }),
+            Line::from(if let Some(prompt) = &app.prompt { format!("{}: {}_ (Enter next, Esc cancel)", prompt.labels[prompt.values.len()], safe_text(&prompt.text).replace('\n', "↵")) } else if app.searching { format!("Find: {}_ (Enter search, Esc cancel)", safe_text(&app.search)) } else { "tab view | j/k select | PgUp/PgDn diff | / find | n next | d base | v seen | r refresh | q quit".into() }),
             Line::from(actions),
             Line::from(Span::styled(
                 format!("Action: {}", safe_text(&app.message).replace('\n', " | ")),
@@ -185,6 +186,13 @@ fn list_items(app: &App) -> (Vec<ListItem<'static>>, bool) {
                 .collect(),
             "No workspaces",
         ),
+        ViewMode::PrFiles => (
+            app.pr_files
+                .iter()
+                .map(|file| format!("{} {}", file.status, file.filename.escape_debug()))
+                .collect(),
+            "No PR files loaded",
+        ),
         ViewMode::PullRequests => (
             app.pull_requests
                 .iter()
@@ -197,7 +205,7 @@ fn list_items(app: &App) -> (Vec<ListItem<'static>>, bool) {
                     )
                 })
                 .collect(),
-            "No open pull requests",
+            "No matching pull requests",
         ),
         ViewMode::Files => (
             app.displayed_files()

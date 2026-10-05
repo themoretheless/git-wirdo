@@ -187,3 +187,51 @@ fn reset_consequences_and_reflog_recovery_are_visible() {
     app.handle(Action::New);
     assert!(screen(&app, 120, 24).contains("New recovery branch name"));
 }
+
+#[test]
+fn pr_file_view_shows_two_line_numbers_and_inline_comment_target() {
+    use git_wirdo::{github::PullRequest, model::ViewMode, pr_review::PrFile};
+    let r = TestRepo::new();
+    let mut app = App::new(r.open()).unwrap();
+    app.view = ViewMode::PrFiles;
+    app.review_pr = Some(PullRequest {
+        number: 7,
+        title: "Review".into(),
+        url: "url".into(),
+        head_ref_name: "topic".into(),
+        base_ref_name: "main".into(),
+        head_ref_oid: "a".repeat(40),
+        is_draft: false,
+    });
+    app.pr_files.push(PrFile {
+        filename: "file.rs".into(),
+        sha: "blob".into(),
+        status: "modified".into(),
+        previous_filename: None,
+        patch: Some("@@ -4 +4 @@\n-old\n+new".into()),
+    });
+    app.handle(Action::NextItem);
+    let rendered = screen(&app, 180, 30);
+    assert!(
+        rendered.contains("View: PrFiles")
+            && rendered.contains("PR #7 file.rs")
+            && rendered.contains("Old line | New line")
+    );
+    app.handle(Action::CommentPr);
+    assert!(screen(&app, 180, 30).contains("Diff side: LEFT or RIGHT"));
+}
+#[test]
+fn multiline_paste_is_input_text_and_large_paste_is_rejected_without_truncation() {
+    let r = TestRepo::new();
+    let mut app = App::new(r.open()).unwrap();
+    app.handle_paste("qPcs");
+    assert!(app.running && app.prompt.is_none());
+    app.handle(Action::Commit);
+    app.handle_paste("literal qPcs\nmessage");
+    assert_eq!(app.prompt.as_ref().unwrap().text, "literal qPcs\nmessage");
+    let before = app.prompt.as_ref().unwrap().text.clone();
+    app.handle_paste(&"x".repeat(64 * 1024));
+    assert!(app.message_is_error);
+    assert_eq!(app.prompt.as_ref().unwrap().text, before);
+    assert!(screen(&app, 180, 30).contains("literal qPcs↵message"));
+}

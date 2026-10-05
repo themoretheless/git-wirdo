@@ -3,7 +3,7 @@ use std::time::Duration;
 
 use anyhow::{Result, ensure};
 use crossterm::cursor::Show;
-use crossterm::event::{self, Event};
+use crossterm::event::{self, DisableBracketedPaste, EnableBracketedPaste, Event};
 use crossterm::execute;
 use crossterm::terminal::{
     EnterAlternateScreen, LeaveAlternateScreen, disable_raw_mode, enable_raw_mode,
@@ -23,7 +23,7 @@ impl TerminalGuard {
         enable_raw_mode()?;
         // Construct the guard before the next fallible step so partial setup is also cleaned up.
         let guard = Self;
-        execute!(io::stdout(), EnterAlternateScreen)?;
+        execute!(io::stdout(), EnterAlternateScreen, EnableBracketedPaste)?;
         Ok(guard)
     }
 }
@@ -36,7 +36,12 @@ impl Drop for TerminalGuard {
 
 fn restore_terminal() {
     let _ = disable_raw_mode();
-    let _ = execute!(io::stdout(), LeaveAlternateScreen, Show);
+    let _ = execute!(
+        io::stdout(),
+        DisableBracketedPaste,
+        LeaveAlternateScreen,
+        Show
+    );
 }
 
 pub fn run(repository: Repository) -> Result<()> {
@@ -61,10 +66,12 @@ pub fn run(repository: Repository) -> Result<()> {
             break;
         }
         terminal.draw(|frame| ui.draw(frame, &session.app))?;
-        if event::poll(Duration::from_millis(100))?
-            && let Event::Key(key) = event::read()?
-        {
-            session.handle_key(key);
+        if event::poll(Duration::from_millis(100))? {
+            match event::read()? {
+                Event::Key(key) => session.handle_key(key),
+                Event::Paste(text) => session.handle_paste(&text),
+                _ => {}
+            }
         }
     }
     Ok(())
