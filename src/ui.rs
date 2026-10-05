@@ -9,7 +9,7 @@ use crate::model::{ViewMode, display_path};
 
 #[derive(Default)]
 pub struct Ui {
-    lists: [ListState; 12],
+    lists: [ListState; 13],
 }
 
 impl Ui {
@@ -100,7 +100,8 @@ impl Ui {
             ViewMode::Files => {
                 "s stage | u unstage | i hunks | w restore index | D discard HEAD | c commit | b branch | f fetch | p pull | P push"
             }
-            ViewMode::History => "+ older commits | Y cherry-pick | Z revert | c commit",
+            ViewMode::History => "g graph/patch | + older | Y cherry-pick | Z revert | F reset",
+            ViewMode::Reflog => "+ older entries | N recover into new branch",
             ViewMode::Branches => "enter switch | b new | B rename | D delete | m merge | z rebase",
             ViewMode::GitHubRepositories => "enter clone | G auth status | O open local repository",
             ViewMode::Workspaces => "enter open | N create | D remove | O open repository",
@@ -217,6 +218,13 @@ fn list_items(app: &App) -> (Vec<ListItem<'static>>, bool) {
                 })
                 .collect(),
             "No changes",
+        ),
+        ViewMode::Reflog => (
+            app.reflog
+                .iter()
+                .map(|e| format!("{} {} {}", e.selector, e.sha, e.subject))
+                .collect(),
+            "No reflog entries",
         ),
         ViewMode::History => (
             app.state

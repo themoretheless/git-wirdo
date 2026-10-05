@@ -144,3 +144,23 @@ fn tag_listing_is_noninteractive_and_keeps_refs() {
     assert!(String::from_utf8(output.stdout).unwrap().contains("v1"));
     assert_eq!(fixture.git(&["rev-parse", "refs/tags/v1"]), before);
 }
+
+#[test]
+fn reflog_inspection_includes_previous_commit_after_reset() {
+    let fixture = TestRepo::new();
+    fixture.write("file", "base");
+    fixture.commit_all("base");
+    fixture.write("file", "second");
+    fixture.commit_all("second");
+    let sha = fixture.git(&["rev-parse", "HEAD"]).trim().to_owned();
+    fixture.git(&["reset", "--hard", "HEAD~1"]);
+    let output = binary()
+        .arg("--repo")
+        .arg(&fixture.path)
+        .arg("--list-reflog")
+        .output()
+        .unwrap();
+    assert!(output.status.success());
+    let text = String::from_utf8(output.stdout).unwrap();
+    assert!(text.contains(&sha) && text.contains("HEAD@{"));
+}

@@ -42,6 +42,45 @@ pub struct RestoreRequest {
     snapshot: FileSnapshot,
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum ResetMode {
+    Soft,
+    Mixed,
+    Hard,
+}
+impl ResetMode {
+    pub fn parse(value: &str) -> Result<Self> {
+        match value {
+            "soft" => Ok(Self::Soft),
+            "mixed" => Ok(Self::Mixed),
+            "hard" => Ok(Self::Hard),
+            _ => bail!("Choose soft, mixed or hard"),
+        }
+    }
+    fn flag(self) -> &'static str {
+        match self {
+            Self::Soft => "--soft",
+            Self::Mixed => "--mixed",
+            Self::Hard => "--hard",
+        }
+    }
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+struct ResetSnapshot {
+    head: String,
+    head_ref: Vec<u8>,
+    status: Vec<u8>,
+    index: Vec<u8>,
+    flags: Vec<u8>,
+    files: Vec<FileSnapshot>,
+}
+#[derive(Debug, Clone)]
+pub struct ResetRequest {
+    pub target: String,
+    snapshot: ResetSnapshot,
+}
+
 #[derive(Debug, Clone, Copy)]
 pub enum ConflictSide {
     Ours,
@@ -514,6 +553,24 @@ impl Repository {
             .collect()
     }
 
+    pub fn history_graph(&self, limit: usize) -> Result<String> {
+        if !self.has_head()? {
+            return Ok(String::new());
+        }
+        self.text(&[
+            "log",
+            "--no-color",
+            "--no-show-signature",
+            "--all",
+            "--topo-order",
+            "--graph",
+            "-n",
+            &limit.to_string(),
+            "--decorate=short",
+            "--format=%H %s %d",
+        ])
+    }
+
     pub fn history(&self, limit: usize) -> Result<Vec<CommitEntry>> {
         let limit = limit.to_string();
         if !self.has_head()? {
@@ -524,6 +581,7 @@ impl Repository {
             [
                 "log",
                 "--no-color",
+                "--no-show-signature",
                 "-z",
                 "-n",
                 &limit,
@@ -965,6 +1023,217 @@ impl Repository {
     pub fn mark_resolved(&self, path: &Path) -> Result<()> {
         self.run_paths(&["add", "--all"], &[path])?;
         Ok(())
+    }
+
+    fn verify_commit_id(&self, sha: &str) -> Result<()> {
+        ensure!(
+            matches!(sha.len(), 40 | 64) && sha.bytes().all(|b| b.is_ascii_hexdigit()),
+            "Select a full commit ID"
+        );
+        let target = format!("{sha}^{{commit}}");
+        ensure!(
+            self.text(&["rev-parse", "--verify", "--end-of-options", &target])?
+                .trim()
+                == sha,
+            "Selected commit changed"
+        );
+        Ok(())
+    }
+
+    pub fn reflog(&self, limit: usize) -> Result<Vec<crate::model::ReflogEntry>> {
+        let bytes = if self.has_head()? {
+            git(
+                &self.root,
+                [
+                    "reflog",
+                    "show",
+                    "--no-color",
+                    "--no-show-signature",
+                    "-z",
+                    "-n",
+                    &limit.to_string(),
+                    "--format=%H%x00%gD%x00%gs",
+                    "HEAD",
+                    "--",
+                ],
+            )?
+        } else {
+            Vec::new()
+        };
+        let text = String::from_utf8_lossy(&bytes);
+        let fields: Vec<_> = text.split_terminator('\0').collect();
+        let (records, remainder) = fields.as_chunks::<3>();
+        ensure!(remainder.is_empty(), "Invalid reflog record from Git");
+        let mut entries: Vec<_> = records
+            .iter()
+            .map(|p| crate::model::ReflogEntry {
+                sha: p[0].into(),
+                selector: p[1].into(),
+                subject: p[2].into(),
+            })
+            .collect();
+        // Persistent pre-reset references remain discoverable even after HEAD reflog expires.
+        let backups = self.text(&[
+            "for-each-ref",
+            "--sort=-refname",
+            &format!("--count={limit}"),
+            "--format=%(objectname)%00%(refname)%00%(subject)",
+            "refs/git-wirdo/recovery/",
+        ])?;
+        for line in backups.lines() {
+            let fields: Vec<_> = line.split('\0').collect();
+            ensure!(
+                fields.len() == 3,
+                "Invalid recovery reference record from Git"
+            );
+            entries.push(crate::model::ReflogEntry {
+                sha: fields[0].into(),
+                selector: fields[1].into(),
+                subject: fields[2].into(),
+            });
+        }
+        Ok(entries)
+    }
+
+    pub fn recover_commit(&self, sha: &str, branch: &str) -> Result<()> {
+        self.verify_commit_id(sha)?;
+        ensure!(
+            !branch.trim().is_empty(),
+            "Enter a new recovery branch name"
+        );
+        git(&self.root, ["check-ref-format", "--branch", branch])?;
+        git(&self.root, ["branch", "--", branch, sha])?;
+        Ok(())
+    }
+
+    fn reset_snapshot(&self) -> Result<ResetSnapshot> {
+        let state = self.load_state()?;
+        ensure!(
+            !state.merge_state.in_progress() && state.merge_state.conflicts.is_empty(),
+            "Finish the current Git operation first"
+        );
+        ensure!(self.has_head()?, "HEAD does not exist");
+        let head_ref = git_output(&self.root, ["symbolic-ref", "--quiet", "HEAD"])?;
+        ensure!(
+            head_ref.status.success() || head_ref.status.code() == Some(1),
+            "Cannot inspect HEAD reference"
+        );
+        let flags = git(&self.root, ["ls-files", "-v", "-z"])?;
+        let mut tracked = state
+            .files
+            .into_iter()
+            .filter(|file| file.status != "??")
+            .collect::<Vec<_>>();
+        // Status deliberately hides assume-unchanged and skip-worktree paths; include their
+        // content in confirmation checks as reset --hard may overwrite hidden changes.
+        for record in flags.split(|b| *b == 0).filter(|r| r.len() > 2) {
+            if record[0].is_ascii_lowercase() || record[0] == b'S' {
+                let path = path_from_bytes(&record[2..])?;
+                if !tracked.iter().any(|f| f.path == path) {
+                    tracked.push(FileEntry {
+                        path,
+                        original_path: None,
+                        status: String::new(),
+                        staged: false,
+                        unstaged: false,
+                        conflicted: false,
+                    });
+                }
+            }
+        }
+        let files = tracked
+            .iter()
+            .filter(|file| !self.root.join(&file.path).is_dir())
+            .map(|file| self.file_snapshot(file))
+            .collect::<Result<Vec<_>>>()?;
+        Ok(ResetSnapshot {
+            head: self.text(&["rev-parse", "HEAD"])?.trim().into(),
+            head_ref: head_ref.stdout,
+            status: git(
+                &self.root,
+                ["status", "--porcelain=v1", "-z", "--untracked-files=all"],
+            )?,
+            index: git(&self.root, ["ls-files", "--stage", "-z"])?,
+            flags,
+            files,
+        })
+    }
+
+    pub fn prepare_reset(&self, sha: &str) -> Result<ResetRequest> {
+        self.verify_commit_id(sha)?;
+        Ok(ResetRequest {
+            target: sha.into(),
+            snapshot: self.reset_snapshot()?,
+        })
+    }
+
+    pub fn reset_commit(&self, request: &ResetRequest, mode: ResetMode) -> Result<String> {
+        ensure!(
+            self.reset_snapshot()? == request.snapshot,
+            "Repository changed since reset preview; refresh and confirm again"
+        );
+        self.verify_commit_id(&request.target)?;
+        if mode == ResetMode::Hard {
+            let target = git(
+                &self.root,
+                ["ls-tree", "-r", "-z", "--name-only", &request.target],
+            )?;
+            // Include ignored files: reset --hard can remove untracked paths that obstruct its tree.
+            let others = git(&self.root, ["ls-files", "--others", "-z"])?;
+            let normalize = |path: PathBuf| {
+                #[cfg(any(target_os = "macos", windows))]
+                {
+                    PathBuf::from(path.to_string_lossy().to_lowercase())
+                }
+                #[cfg(not(any(target_os = "macos", windows)))]
+                {
+                    path
+                }
+            };
+            let targets = target
+                .split(|b| *b == 0)
+                .filter(|p| !p.is_empty())
+                .map(|raw| path_from_bytes(raw).map(normalize))
+                .collect::<Result<std::collections::HashSet<_>>>()?;
+            let ancestors = targets
+                .iter()
+                .flat_map(|path| path.ancestors().skip(1).map(Path::to_owned))
+                .collect::<std::collections::HashSet<_>>();
+            for raw in others.split(|b| *b == 0).filter(|p| !p.is_empty()) {
+                let other = path_from_bytes(raw)?;
+                let comparable = normalize(other.clone());
+                let overlap = ancestors.contains(&comparable)
+                    || comparable.ancestors().any(|p| targets.contains(p));
+                ensure!(
+                    !overlap,
+                    "Hard reset would remove untracked/ignored path {}; move it first",
+                    display_path(&other)
+                );
+            }
+        }
+        ensure!(
+            self.reset_snapshot()? == request.snapshot,
+            "Repository changed during reset preparation; refresh and confirm again"
+        );
+        let stamp = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)?
+            .as_nanos();
+        let recovery = format!("refs/git-wirdo/recovery/{stamp}-{}", std::process::id());
+        let zero = "0".repeat(request.snapshot.head.len());
+        git(
+            &self.root,
+            [
+                "update-ref",
+                "--create-reflog",
+                "-m",
+                "git-wirdo before reset",
+                &recovery,
+                &request.snapshot.head,
+                &zero,
+            ],
+        )?;
+        git(&self.root, ["reset", mode.flag(), &request.target, "--"])?;
+        Ok(recovery)
     }
 
     /// Apply or undo exactly one immutable commit, preserving Git's conflict state.

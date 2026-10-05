@@ -10,6 +10,8 @@ use crate::model::{RepoState, ViewMode, display_path};
 /// UI-independent commands; terminal key bindings live in `input`.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Action {
+    ResetCommit,
+    ToggleGraph,
     LoadHistory,
     CherryPick,
     RevertCommit,
@@ -68,6 +70,8 @@ pub enum Action {
 
 #[derive(Debug, Clone)]
 pub enum PromptKind {
+    ResetCommit(crate::git::ResetRequest),
+    RecoverCommit(String),
     ApplyCommit(String, bool),
     RestoreFile(crate::git::RestoreRequest),
     CreateTag,
@@ -116,6 +120,11 @@ pub struct App {
     pub file_selection: usize,
     pub history_selection: usize,
     pub history_limit: usize,
+    pub graph_visible: bool,
+    pub history_graph: String,
+    pub reflog: Vec<crate::model::ReflogEntry>,
+    pub reflog_selection: usize,
+    pub reflog_limit: usize,
     pub branch_selection: usize,
     pub conflict_selection: usize,
     pub detail_text: String,
@@ -160,6 +169,11 @@ impl App {
             file_selection: 0,
             history_selection: 0,
             history_limit: 20,
+            graph_visible: false,
+            history_graph: String::new(),
+            reflog: Vec::new(),
+            reflog_selection: 0,
+            reflog_limit: 100,
             branch_selection: 0,
             conflict_selection: 0,
             detail_text: String::new(),
@@ -265,8 +279,17 @@ impl App {
 
     fn load_extra(&mut self) -> Result<()> {
         match self.view {
+            ViewMode::Reflog => {
+                self.reflog = self.repository.reflog(self.reflog_limit)?;
+                self.reflog_selection = self
+                    .reflog_selection
+                    .min(self.reflog.len().saturating_sub(1));
+            }
             ViewMode::History => {
                 self.state.commits = self.repository.history(self.history_limit)?;
+                if self.graph_visible {
+                    self.history_graph = self.repository.history_graph(self.history_limit)?;
+                }
                 self.history_selection = self
                     .history_selection
                     .min(self.state.commits.len().saturating_sub(1));
@@ -328,6 +351,7 @@ impl App {
 
     pub fn selection(&self) -> usize {
         match self.view {
+            ViewMode::Reflog => self.reflog_selection,
             ViewMode::Hunks => self.hunk_selection,
             ViewMode::Tags => self.tag_selection,
             ViewMode::Remotes => self.remote_selection,
@@ -346,6 +370,7 @@ impl App {
     fn move_selection(&mut self, delta: isize) {
         let file_len = self.displayed_files().len();
         let (selection, len) = match self.view {
+            ViewMode::Reflog => (&mut self.reflog_selection, self.reflog.len()),
             ViewMode::Hunks => (&mut self.hunk_selection, self.hunks.len()),
             ViewMode::Tags => (&mut self.tag_selection, self.tags.len()),
             ViewMode::Remotes => (&mut self.remote_selection, self.remotes.len()),
@@ -380,10 +405,23 @@ impl App {
         self.detail_text = self
             .selected_detail()
             .unwrap_or_else(|error| format!("Cannot load details:\n{error:#}"));
+        if self.view == ViewMode::History
+            && self.graph_visible
+            && let Some(line) = self
+                .detail_text
+                .lines()
+                .position(|line| line.starts_with("> "))
+        {
+            self.detail_scroll = line.saturating_sub(3).min(u16::MAX as usize) as u16;
+        }
     }
 
     fn selected_detail(&self) -> Result<String> {
         match self.view {
+            ViewMode::Reflog => match self.reflog.get(self.reflog_selection) {
+                Some(entry) => self.repository.commit_detail(&crate::model::CommitEntry { sha: entry.sha.clone(), short_sha: String::new(), date: String::new(), author: String::new(), subject: entry.subject.clone() }),
+                None => Ok("No reflog entry selected".into()),
+            },
             ViewMode::Hunks => Ok(self.hunks.get(self.hunk_selection).map(|hunk| format!("{} hunk {}/{}\n{}\n\n{}", if hunk.staged { "Staged" } else { "Unstaged" }, self.hunk_selection + 1, self.hunks.len(), display_path(&hunk.file.path), String::from_utf8_lossy(&hunk.patch))).unwrap_or_else(|| "No text hunks. d switches staged/unstaged. Use full-file staging for untracked, binary, rename or mode changes.".into())),
             ViewMode::Tags => match self.tags.get(self.tag_selection) {
                 Some(tag) => Ok(format!("{} ({})\n{}\n\n{}", tag.name, tag.kind, tag.sha, self.repository.tag_detail(tag)?)),
@@ -406,6 +444,10 @@ impl App {
                 Some(file) => self.repository.file_detail(file),
                 None => Ok("No files selected".to_owned()),
             },
+            ViewMode::History if self.graph_visible => {
+                let selected = self.state.commits.get(self.history_selection).map(|c| c.sha.as_str());
+                Ok(self.history_graph.lines().map(|line| format!("{}{}", if selected.is_some_and(|sha| line.contains(sha)) { "> " } else { "  " }, line)).collect::<Vec<_>>().join("\n"))
+            }
             ViewMode::History => match self.state.commits.get(self.history_selection) {
                 Some(commit) => self.repository.commit_detail(commit),
                 None => Ok("No commit selected".to_owned()),
@@ -539,6 +581,25 @@ impl App {
         use anyhow::ensure;
         let v = prompt.values;
         let output = match prompt.kind {
+            PromptKind::RecoverCommit(sha) => {
+                self.repository.recover_commit(&sha, &v[0])?;
+                format!("Recovered {} into branch {}; checkout unchanged", sha, v[0])
+            }
+            PromptKind::ResetCommit(request) => {
+                let mode = crate::git::ResetMode::parse(v[0].trim())?;
+                ensure!(
+                    v[1] == request.target,
+                    "Reset cancelled: confirm full target commit ID"
+                );
+                let result = self.repository.reset_commit(&request, mode);
+                let refreshed = self.refresh();
+                let recovery = result?;
+                refreshed?;
+                format!(
+                    "Reset {} to {}; previous HEAD saved as {}",
+                    v[0], request.target, recovery
+                )
+            }
             PromptKind::ApplyCommit(sha, revert) => {
                 ensure!(
                     v[0] == sha,
@@ -816,9 +877,47 @@ impl App {
 
     fn apply(&mut self, action: Action) -> Result<()> {
         match action {
+            Action::ToggleGraph if self.view == ViewMode::History => {
+                self.graph_visible = !self.graph_visible;
+                self.load_extra()?;
+                self.refresh_detail();
+            }
+            Action::New if self.view == ViewMode::Reflog => {
+                if let Some(entry) = self.reflog.get(self.reflog_selection) {
+                    self.message = format!("Recover {}: {}", entry.sha, entry.subject);
+                    self.start_prompt(
+                        PromptKind::RecoverCommit(entry.sha.clone()),
+                        vec!["New recovery branch name (checkout unchanged)"],
+                    );
+                }
+            }
+            Action::LoadHistory if self.view == ViewMode::Reflog => {
+                self.reflog_limit = self.reflog_limit.saturating_add(100);
+                self.load_extra()?;
+                self.refresh_detail();
+                self.message = format!("Loaded {} reflog entries", self.reflog.len());
+                self.message_is_error = false;
+            }
+            Action::ResetCommit if self.view == ViewMode::History => {
+                if let Some(commit) = self.state.commits.get(self.history_selection) {
+                    let request = self.repository.prepare_reset(&commit.sha)?;
+                    self.message = format!(
+                        "Reset to {}: soft keeps index/files; mixed unstages; hard discards tracked changes",
+                        request.target
+                    );
+                    self.start_prompt(
+                        PromptKind::ResetCommit(request),
+                        vec![
+                            "Reset mode: soft, mixed, hard",
+                            "Type full target commit ID to confirm",
+                        ],
+                    );
+                }
+            }
             Action::LoadHistory if self.view == ViewMode::History => {
                 self.history_limit = self.history_limit.saturating_add(100);
                 self.load_extra()?;
+                self.refresh_detail();
                 self.message = format!(
                     "Loaded {} commits across branches",
                     self.state.commits.len()

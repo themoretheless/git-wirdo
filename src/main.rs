@@ -26,6 +26,9 @@ struct Cli {
     /// List local tags without starting the TUI.
     #[arg(long, group = "inspection")]
     list_tags: bool,
+    /// List HEAD reflog entries without starting the TUI.
+    #[arg(long, group = "inspection")]
+    list_reflog: bool,
     /// List open GitHub pull requests without starting the TUI.
     #[arg(long, group = "inspection")]
     list_prs: bool,
@@ -55,6 +58,17 @@ fn main() -> Result<()> {
         None => env::current_dir().context("Cannot determine the current directory")?,
     };
     let repository = Repository::open(&path)?;
+    if cli.list_reflog {
+        for entry in repository.reflog(100)? {
+            println!(
+                "{} {} {}",
+                entry.selector,
+                entry.sha,
+                entry.subject.escape_debug()
+            );
+        }
+        return Ok(());
+    }
     if cli.list_tags {
         for tag in repository.tags()? {
             println!(

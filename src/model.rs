@@ -93,6 +93,7 @@ pub enum ViewMode {
     RemoteBranches,
     Tags,
     Hunks,
+    Reflog,
 }
 
 impl ViewMode {
@@ -110,6 +111,7 @@ impl ViewMode {
             Self::RemoteBranches => 9,
             Self::Tags => 10,
             Self::Hunks => 11,
+            Self::Reflog => 12,
         }
     }
 
@@ -126,7 +128,8 @@ impl ViewMode {
             Self::Remotes => Self::RemoteBranches,
             Self::RemoteBranches => Self::Tags,
             Self::Tags => Self::Hunks,
-            Self::Hunks => Self::Files,
+            Self::Hunks => Self::Reflog,
+            Self::Reflog => Self::Files,
         }
     }
 }
@@ -194,5 +197,12 @@ pub struct TagEntry {
     pub name: String,
     pub sha: String,
     pub kind: String,
+    pub subject: String,
+}
+
+#[derive(Debug, Clone)]
+pub struct ReflogEntry {
+    pub sha: String,
+    pub selector: String,
     pub subject: String,
 }

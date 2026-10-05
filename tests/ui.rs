@@ -166,3 +166,24 @@ fn hunk_view_and_discard_scope_are_visible() {
     let rendered = screen(&app, 180, 28);
     assert!(rendered.contains("Type discard") && rendered.contains("staged changes retained"));
 }
+
+#[test]
+fn reset_consequences_and_reflog_recovery_are_visible() {
+    use git_wirdo::model::ViewMode;
+    let fixture = TestRepo::new();
+    fixture.write("file", "base");
+    fixture.commit_all("base");
+    let mut app = App::new(fixture.open()).unwrap();
+    app.view = ViewMode::History;
+    app.handle(Action::ResetCommit);
+    let rendered = screen(&app, 180, 30);
+    assert!(rendered.contains("Reset mode: soft, mixed, hard"));
+    assert!(rendered.contains("hard discards tracked changes"));
+    app.prompt = None;
+    app.view = ViewMode::Reflog;
+    app.refresh().unwrap();
+    let rendered = screen(&app, 120, 24);
+    assert!(rendered.contains("View: Reflog") && rendered.contains("HEAD@{"));
+    app.handle(Action::New);
+    assert!(screen(&app, 120, 24).contains("New recovery branch name"));
+}

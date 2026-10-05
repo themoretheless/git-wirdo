@@ -102,14 +102,14 @@ resolution, continuation or abort; they are never silently resolved.
 History begins with 20 commits across local/remote branches in topological order.
 `+` loads another 100 (and keeps the larger window on refresh). `/` searches loaded
 commit IDs, subjects, authors and dates; `n` moves to the next matching commit.
-Use PageUp/PageDown for long patches. The history graph is still pending.
+Use PageUp/PageDown for long patches. `g` toggles the branch/merge graph in the detail pane; j/k highlights the selected commit.
 
 In History, `Y` cherry-picks the selected commit and `Z` reverts it by creating a
 new commit. Confirm the full selected commit ID; leave the mainline field blank
 for ordinary commits, or enter the parent number for a merge commit. Both actions
 require a clean checkout and no unfinished operation. Conflicts are retained in
 Conflicts: resolve and stage, then `e` continues or `x` aborts. `K` remains specific
-to rebase. Reset/reflog recovery are still pending.
+to rebase. `F` opens reset; modes and recovery are described below.
 Network operations remain synchronous.
 
 ## Code layout
@@ -156,13 +156,12 @@ only in that view, so reviewing a committed change cannot modify the index.
 shows review progress. Refresh retains marks only while the file's displayed
 contents remain identical; edits or removed files clear their marks. Marks are
 independent between working and upstream comparisons and are not saved to disk.
-Search is case-sensitive within the selected details, including commit and
-conflict views. While entering a query, ordinary shortcut letters are text.
+Search is case-sensitive: loaded commit metadata in History, selected details in other views. While entering a query, ordinary shortcut letters are text.
 
 ## Workspaces and GitHub
 
 Tab cycles Files → History → Branches → Conflicts → Workspaces → PullRequests →
-GitHubRepositories → Stashes → Remotes → RemoteBranches → Tags → Hunks. `O` opens another local repository by path; the previous
+GitHubRepositories → Stashes → Remotes → RemoteBranches → Tags → Hunks → Reflog. `O` opens another local repository by path; the previous
 checkout and its files remain on disk. Relative paths are resolved from the
 current repository root. Workspaces are Git linked worktrees, not cloud sessions. Listing uses the
 [NUL-delimited porcelain format](https://git-scm.com/docs/git-worktree/2.36.0),
@@ -306,3 +305,30 @@ The prompt shows the selected path and exact scope. File content, permissions,
 index and HEAD changes since opening the prompt invalidate confirmation. Restore
 refuses conflicted files; use the Conflicts view for those. Before the initial
 commit, unstage a newly staged file instead of requesting a nonexistent HEAD.
+
+
+## Reset and recovery
+
+In History, `F` resets the current branch (or detached HEAD) to the selected commit.
+Choose `soft`, `mixed` or `hard`, then type the full target commit ID:
+
+- `soft` moves HEAD, retaining staged and working changes.
+- `mixed` moves HEAD and resets the index to the target, retaining working files.
+- `hard` also replaces tracked working files, discarding their changes.
+
+Reset is refused during an unfinished operation or when HEAD, its branch, the
+index, file status or affected content changes after opening the prompt. Hard
+reset refuses untracked/ignored paths that obstruct the target tree. Move these
+paths first; unrelated untracked/ignored files remain. Submodule working trees
+are not recursively reset.
+
+Before every reset, the previous HEAD is saved in a persistent local
+`refs/git-wirdo/recovery/...` reference, shown in the result message. This protects
+committed history from garbage collection; it does **not** save discarded
+uncommitted changes. No force push is performed.
+
+Reflog shows the current workspace's HEAD movements and persistent pre-reset references, including commits no longer
+on a branch. `+` loads older entries. `N` creates a new named branch at the
+selected immutable commit ID without switching checkout or touching local edits.
+Existing branches cannot be overwritten. `--list-reflog` lists the first 100 HEAD entries plus up to 100 recovery references without starting the terminal UI. Linked workspaces have separate HEAD
+reflogs; Git's configured reflog expiration still applies.

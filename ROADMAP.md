@@ -27,9 +27,13 @@ Implemented foundations:
 - Expandable cross-branch history and metadata search; confirmed cherry-pick and
   revert (including explicit merge mainline), conflict continuation/abort.
 
+- Git branch/merge graph, explicit soft/mixed/hard reset with stale-confirmation
+  and untracked obstruction checks, persistent pre-reset HEAD references, and
+  workspace HEAD reflog inspection/recovery into a new branch.
+
 Remaining acceptance work:
 
-- History graph and commit reset with clear modes, reflog and recovery.
+
 - Long Git/network/hook operations must not freeze the TUI. Show progress, prevent
   conflicting mutations and implement cancellation with correct process cleanup.
 - GitHub PR editing, ready-for-review, inline review comments, pagination/filtering

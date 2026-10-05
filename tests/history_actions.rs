@@ -187,3 +187,38 @@ fn history_search_selects_matching_commits_and_wraps_without_writes() {
     assert_eq!(app.history_selection, 0);
     assert_eq!(repo.git(&["rev-parse", "HEAD"]), before);
 }
+
+#[test]
+fn graph_shows_sibling_branches_and_merge_edges_with_selected_commit() {
+    let repo = TestRepo::new();
+    repo.write("base", "base");
+    repo.commit_all("base");
+    repo.git(&["switch", "-c", "topic"]);
+    repo.write("topic", "topic");
+    repo.commit_all("topic");
+    repo.git(&["switch", "main"]);
+    repo.write("main", "main");
+    repo.commit_all("main");
+    repo.git(&["merge", "--no-edit", "topic"]);
+    let mut app = App::new(repo.open()).unwrap();
+    app.view = ViewMode::History;
+    app.handle(Action::ToggleGraph);
+    assert!(
+        app.graph_visible && app.detail_text.contains("|\\") && app.detail_text.contains("topic")
+    );
+    let sha = app.state.commits[0].sha.clone();
+    assert!(
+        app.detail_text
+            .lines()
+            .any(|line| line.starts_with("> ") && line.contains(&sha))
+    );
+    app.handle(Action::NextItem);
+    let sha = &app.state.commits[1].sha;
+    assert!(
+        app.detail_text
+            .lines()
+            .any(|line| line.starts_with("> ") && line.contains(sha))
+    );
+    app.handle(Action::ToggleGraph);
+    assert!(!app.graph_visible && app.detail_text.contains(&app.state.commits[1].subject));
+}
