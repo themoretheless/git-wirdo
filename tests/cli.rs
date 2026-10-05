@@ -82,3 +82,65 @@ fn explicit_repository_wins_over_inherited_git_environment() {
     assert!(text.contains("target.txt"));
     assert!(!text.contains("other.txt"));
 }
+
+#[test]
+fn workspace_listing_is_read_only_and_noninteractive() {
+    let fixture = TestRepo::new();
+    fixture.write("file", "base");
+    fixture.commit_all("base");
+    let workspace = fixture.directory.0.join("another checkout");
+    fixture
+        .open()
+        .create_workspace(&workspace, "topic")
+        .unwrap();
+    let before = fixture.git(&["status", "--porcelain"]);
+    let output = binary()
+        .arg("--repo")
+        .arg(&fixture.path)
+        .arg("--list-workspaces")
+        .output()
+        .unwrap();
+    assert!(output.status.success());
+    let text = String::from_utf8(output.stdout).unwrap();
+    assert!(text.contains("topic") && text.contains("another checkout"));
+    assert!(!text.contains('\x1b'));
+    assert_eq!(fixture.git(&["status", "--porcelain"]), before);
+}
+
+#[test]
+fn stash_listing_does_not_apply_or_remove_entries() {
+    let fixture = TestRepo::new();
+    fixture.write("file", "base");
+    fixture.commit_all("base");
+    fixture.write("untracked", "saved");
+    fixture.open().save_stash("CLI stash").unwrap();
+    let output = binary()
+        .arg("--repo")
+        .arg(&fixture.path)
+        .arg("--list-stashes")
+        .output()
+        .unwrap();
+    assert!(output.status.success());
+    let text = String::from_utf8(output.stdout).unwrap();
+    assert!(text.contains("stash@{0}") && text.contains("CLI stash"));
+    assert_eq!(fixture.open().stashes().unwrap().len(), 1);
+    assert!(!fixture.path.join("untracked").exists());
+}
+
+#[test]
+fn tag_listing_is_noninteractive_and_keeps_refs() {
+    let fixture = TestRepo::new();
+    fixture.write("file", "base");
+    fixture.commit_all("base");
+    fixture.open().create_tag("v1", "HEAD", "").unwrap();
+    let before = fixture.git(&["rev-parse", "refs/tags/v1"]);
+    let output = binary()
+        .arg("--repo")
+        .arg(&fixture.path)
+        .arg("--list-tags")
+        .output()
+        .unwrap();
+    assert!(output.status.success());
+    assert!(String::from_utf8(output.stdout).unwrap().contains("v1"));
+    assert_eq!(fixture.git(&["rev-parse", "refs/tags/v1"]), before);
+}

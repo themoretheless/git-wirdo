@@ -11,6 +11,16 @@ fn failed_git_actions_keep_the_app_running_and_show_the_error() {
     let fixture = TestRepo::new();
     let mut app = App::new(fixture.open()).unwrap();
     app.handle(Action::Commit);
+    for c in "empty commit".chars() {
+        app.handle_key(crossterm::event::KeyEvent::new(
+            crossterm::event::KeyCode::Char(c),
+            crossterm::event::KeyModifiers::NONE,
+        ));
+    }
+    app.handle_key(crossterm::event::KeyEvent::new(
+        crossterm::event::KeyCode::Enter,
+        crossterm::event::KeyModifiers::NONE,
+    ));
     assert!(app.running);
     assert!(app.message_is_error);
     assert!(app.detail_text.contains("Git failed"));

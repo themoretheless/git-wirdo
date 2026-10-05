@@ -1,6 +1,6 @@
 use std::ffi::{OsStr, OsString};
 use std::fs;
-use std::io::Read;
+use std::io::{Read, Write};
 use std::path::{Path, PathBuf};
 use std::process::{Command, Output, Stdio};
 
@@ -14,6 +14,32 @@ const PREVIEW_LIMIT: usize = 256 * 1024;
 pub struct Repository {
     root: PathBuf,
     git_dir: PathBuf,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+struct FileSnapshot {
+    index: Vec<u8>,
+    contents: Vec<(PathBuf, SavedContent)>,
+    head: Option<String>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+enum SavedContent {
+    Missing,
+    Symlink(PathBuf),
+    File {
+        content_hash: Vec<u8>,
+        readonly: bool,
+        #[cfg(unix)]
+        mode: u32,
+    },
+}
+
+#[derive(Debug, Clone)]
+pub struct RestoreRequest {
+    pub file: FileEntry,
+    pub from_head: bool,
+    snapshot: FileSnapshot,
 }
 
 #[derive(Debug, Clone, Copy)]
@@ -40,6 +66,395 @@ impl Repository {
         &self.root
     }
 
+    pub fn workspaces(&self) -> Result<Vec<crate::model::Workspace>> {
+        let bytes = git(&self.root, ["worktree", "list", "--porcelain", "-z"])?;
+        let mut result = Vec::new();
+        let mut current: Option<crate::model::Workspace> = None;
+        for record in bytes.split(|b| *b == 0) {
+            if let Some(path) = record.strip_prefix(b"worktree ") {
+                if let Some(entry) = current.take() {
+                    result.push(entry);
+                }
+                current = Some(crate::model::Workspace {
+                    path: path_from_bytes(path)?,
+                    branch: "detached".into(),
+                    locked: false,
+                    bare: false,
+                });
+            } else if let Some(entry) = &mut current {
+                if let Some(branch) = record.strip_prefix(b"branch refs/heads/") {
+                    entry.branch = utf8_line(branch)?;
+                }
+                entry.locked |= record == b"locked" || record.starts_with(b"locked ");
+                entry.bare |= record == b"bare";
+            }
+        }
+        if let Some(entry) = current {
+            result.push(entry);
+        }
+        Ok(result)
+    }
+
+    pub fn create_workspace(&self, path: &Path, branch: &str) -> Result<()> {
+        git(&self.root, ["check-ref-format", "--branch", branch])?;
+        let path = if path.is_absolute() {
+            path.to_owned()
+        } else {
+            self.root.join(path)
+        };
+        git(
+            &self.root,
+            [
+                OsString::from("worktree"),
+                OsString::from("add"),
+                OsString::from("-b"),
+                OsString::from(branch),
+                OsString::from("--"),
+                path.into_os_string(),
+                OsString::from("HEAD"),
+            ],
+        )?;
+        Ok(())
+    }
+
+    pub fn remove_workspace(&self, workspace: &crate::model::Workspace) -> Result<()> {
+        ensure!(
+            !workspace.locked && !workspace.bare,
+            "Locked or bare workspace cannot be removed"
+        );
+        ensure!(
+            workspace.path != self.root,
+            "Cannot remove the current workspace"
+        );
+        // Git refuses the primary checkout, dirty worktrees and locked worktrees. Never force.
+        git(
+            &self.root,
+            [
+                OsString::from("worktree"),
+                OsString::from("remove"),
+                OsString::from("--"),
+                workspace.path.as_os_str().to_owned(),
+            ],
+        )?;
+        Ok(())
+    }
+
+    pub fn ensure_clean(&self) -> Result<()> {
+        let state = self.load_state()?;
+        ensure!(
+            !state.merge_state.in_progress(),
+            "Finish the current Git operation first"
+        );
+        ensure!(
+            state.files.is_empty(),
+            "Commit or stash working changes before this operation"
+        );
+        Ok(())
+    }
+
+    pub fn stashes(&self) -> Result<Vec<crate::model::StashEntry>> {
+        let bytes = git(
+            &self.root,
+            ["stash", "list", "-z", "--format=%gd%x00%H%x00%s"],
+        )?;
+        let text = std::str::from_utf8(&bytes).context("Invalid UTF-8 stash metadata")?;
+        let fields: Vec<_> = text.split_terminator('\0').collect();
+        let (records, remainder) = fields.as_chunks::<3>();
+        ensure!(remainder.is_empty(), "Invalid stash list record");
+        Ok(records
+            .iter()
+            .map(|r| crate::model::StashEntry {
+                selector: r[0].into(),
+                sha: r[1].into(),
+                subject: r[2].into(),
+            })
+            .collect())
+    }
+
+    pub fn stash_detail(&self, stash: &crate::model::StashEntry) -> Result<String> {
+        self.text(&[
+            "stash",
+            "show",
+            "--include-untracked",
+            "--patch",
+            "--no-color",
+            "--no-ext-diff",
+            "--no-textconv",
+            &stash.sha,
+        ])
+    }
+
+    pub fn save_stash(&self, message: &str) -> Result<()> {
+        let state = self.load_state()?;
+        ensure!(
+            !state.merge_state.in_progress() && state.merge_state.conflicts.is_empty(),
+            "Finish the current operation before saving a stash"
+        );
+        ensure!(!state.files.is_empty(), "No changes to stash");
+        git(
+            &self.root,
+            ["stash", "push", "--include-untracked", "--message", message],
+        )?;
+        Ok(())
+    }
+
+    fn verify_stash(&self, stash: &crate::model::StashEntry) -> Result<()> {
+        ensure!(
+            self.stashes()?
+                .iter()
+                .any(|current| current.selector == stash.selector && current.sha == stash.sha),
+            "Stash list changed; refresh and select the entry again"
+        );
+        Ok(())
+    }
+
+    pub fn apply_stash(&self, stash: &crate::model::StashEntry, pop: bool) -> Result<()> {
+        self.ensure_clean()?;
+        self.verify_stash(stash)?;
+        // Native pop retains the reflog entry on conflict. --index restores staged changes.
+        git(
+            &self.root,
+            [
+                "stash",
+                if pop { "pop" } else { "apply" },
+                "--index",
+                &stash.selector,
+            ],
+        )?;
+        Ok(())
+    }
+
+    pub fn drop_stash(&self, stash: &crate::model::StashEntry) -> Result<()> {
+        self.verify_stash(stash)?;
+        git(&self.root, ["stash", "drop", &stash.selector])?;
+        Ok(())
+    }
+
+    pub fn tags(&self) -> Result<Vec<crate::model::TagEntry>> {
+        let text = self.text(&[
+            "for-each-ref",
+            "--sort=-creatordate",
+            "--format=%(refname:strip=2)%00%(objectname)%00%(objecttype)%00%(subject)",
+            "refs/tags/",
+        ])?;
+        text.lines()
+            .map(|line| {
+                let fields: Vec<_> = line.splitn(4, '\0').collect();
+                ensure!(fields.len() == 4, "Invalid tag record");
+                Ok(crate::model::TagEntry {
+                    name: fields[0].into(),
+                    sha: fields[1].into(),
+                    kind: fields[2].into(),
+                    subject: fields[3].into(),
+                })
+            })
+            .collect()
+    }
+
+    pub fn tag_detail(&self, tag: &crate::model::TagEntry) -> Result<String> {
+        self.text(&[
+            "show",
+            "--no-color",
+            "--no-ext-diff",
+            "--no-textconv",
+            "--stat",
+            &tag.sha,
+            "--",
+        ])
+    }
+
+    pub fn create_tag(&self, name: &str, target: &str, message: &str) -> Result<()> {
+        let reference = format!("refs/tags/{name}");
+        git(&self.root, ["check-ref-format", &reference])?;
+        let target = if target.trim().is_empty() {
+            "HEAD"
+        } else {
+            target
+        };
+        let target = format!("{target}^{{commit}}");
+        let sha = self.text(&["rev-parse", "--verify", "--end-of-options", &target])?;
+        if message.trim().is_empty() {
+            git(&self.root, ["tag", "--no-sign", "--", name, sha.trim()])?;
+        } else {
+            git(
+                &self.root,
+                ["tag", "-a", "-m", message, "--", name, sha.trim()],
+            )?;
+        }
+        Ok(())
+    }
+
+    fn verify_tag(&self, tag: &crate::model::TagEntry) -> Result<()> {
+        ensure!(
+            self.tags()?
+                .iter()
+                .any(|t| t.name == tag.name && t.sha == tag.sha),
+            "Tag changed or disappeared; refresh first"
+        );
+        Ok(())
+    }
+
+    pub fn delete_tag(&self, tag: &crate::model::TagEntry) -> Result<()> {
+        // Compare-and-swap ref deletion refuses a tag changed since selection.
+        let reference = format!("refs/tags/{}", tag.name);
+        git(&self.root, ["update-ref", "-d", &reference, &tag.sha])?;
+        Ok(())
+    }
+
+    pub fn publish_tag(&self, tag: &crate::model::TagEntry, remote: &str) -> Result<()> {
+        self.verify_remote(remote)?;
+        self.verify_tag(tag)?;
+        let reference = format!("refs/tags/{}", tag.name);
+        // Publish the selected object, not an unrelated tag or a later replacement.
+        let spec = format!("{}:{reference}", tag.sha);
+        git(&self.root, ["push", "--", remote, &spec])?;
+        Ok(())
+    }
+
+    pub fn delete_remote_tag(&self, tag: &crate::model::TagEntry, remote: &str) -> Result<()> {
+        self.verify_remote(remote)?;
+        let reference = format!("refs/tags/{}", tag.name);
+        let lease = format!("--force-with-lease={reference}:{}", tag.sha);
+        let spec = format!(":{reference}");
+        git(&self.root, ["push", &lease, "--", remote, &spec])?;
+        Ok(())
+    }
+
+    pub fn remotes(&self) -> Result<Vec<crate::model::RemoteEntry>> {
+        self.text(&["remote"])?
+            .lines()
+            .map(|name| {
+                Ok(crate::model::RemoteEntry {
+                    name: name.into(),
+                    fetch_urls: self.text(&["remote", "get-url", "--all", name])?,
+                    push_urls: self.text(&["remote", "get-url", "--push", "--all", name])?,
+                })
+            })
+            .collect()
+    }
+
+    fn verify_remote(&self, name: &str) -> Result<()> {
+        ensure!(
+            self.remotes()?.iter().any(|r| r.name == name),
+            "Remote no longer exists; refresh first"
+        );
+        Ok(())
+    }
+
+    pub fn add_remote(&self, name: &str, url: &str) -> Result<()> {
+        ensure!(
+            !name.is_empty() && !name.starts_with('-') && !url.trim().is_empty(),
+            "Remote name and URL are required"
+        );
+        git(&self.root, ["remote", "add", "--", name, url])?;
+        Ok(())
+    }
+
+    pub fn edit_remote(&self, name: &str, url: &str) -> Result<()> {
+        self.verify_remote(name)?;
+        ensure!(!url.trim().is_empty(), "URL is required");
+        git(&self.root, ["remote", "set-url", "--", name, url])?;
+        Ok(())
+    }
+
+    pub fn edit_push_url(&self, name: &str, url: &str) -> Result<()> {
+        self.verify_remote(name)?;
+        ensure!(!url.trim().is_empty(), "Push URL is required");
+        git(&self.root, ["remote", "set-url", "--push", "--", name, url])?;
+        Ok(())
+    }
+
+    pub fn remove_remote(&self, name: &str) -> Result<()> {
+        self.verify_remote(name)?;
+        git(&self.root, ["remote", "remove", "--", name])?;
+        Ok(())
+    }
+
+    pub fn remote_branches(&self) -> Result<Vec<String>> {
+        let text = self.text(&[
+            "for-each-ref",
+            "--format=%(refname:strip=2)%00%(symref)",
+            "refs/remotes/",
+        ])?;
+        Ok(text
+            .lines()
+            .filter_map(|line| line.split_once('\0'))
+            .filter(|(_, symref)| symref.is_empty())
+            .map(|(name, _)| name.to_owned())
+            .collect())
+    }
+
+    pub fn checkout_remote(&self, remote_branch: &str, local: &str) -> Result<()> {
+        ensure!(
+            self.remote_branches()?.iter().any(|b| b == remote_branch),
+            "Remote branch no longer exists"
+        );
+        git(&self.root, ["check-ref-format", "--branch", local])?;
+        let reference = format!("refs/remotes/{remote_branch}");
+        git(&self.root, ["switch", "--track", "-c", local, &reference])?;
+        Ok(())
+    }
+
+    pub fn tracking(&self) -> Result<crate::model::Tracking> {
+        let branch = self.current_branch()?;
+        let reference = format!("refs/heads/{branch}");
+        let upstream = self
+            .text(&["for-each-ref", "--format=%(upstream:short)", &reference])?
+            .trim()
+            .to_owned();
+        if upstream.is_empty() {
+            return Ok(crate::model::Tracking::default());
+        }
+        let range = format!("HEAD...{upstream}");
+        let counts = self.text(&["rev-list", "--left-right", "--count", &range])?;
+        let mut counts = counts.split_whitespace();
+        Ok(crate::model::Tracking {
+            error: None,
+            upstream: Some(upstream),
+            ahead: counts.next().context("Missing ahead count")?.parse()?,
+            behind: counts.next().context("Missing behind count")?.parse()?,
+        })
+    }
+
+    pub fn set_upstream(&self, reference: &str) -> Result<()> {
+        if reference.trim().is_empty() {
+            git(&self.root, ["branch", "--unset-upstream"])?;
+            return Ok(());
+        }
+        let arg = format!("--set-upstream-to={reference}");
+        git(&self.root, ["branch", &arg])?;
+        Ok(())
+    }
+
+    pub fn publish_branch(&self, remote: &str) -> Result<()> {
+        self.verify_remote(remote)?;
+        let branch = self.current_branch()?;
+        let reference = format!("refs/heads/{branch}");
+        git(&self.root, ["show-ref", "--verify", &reference])?;
+        git(
+            &self.root,
+            ["push", "--set-upstream", "--", remote, &reference],
+        )?;
+        Ok(())
+    }
+
+    pub fn pull_strategy(&self, strategy: &str) -> Result<()> {
+        self.ensure_clean()?;
+        match strategy {
+            "ff-only" => {
+                git(&self.root, ["pull", "--ff-only"])?;
+            }
+            "merge" => {
+                git(&self.root, ["pull", "--no-rebase", "--ff", "--no-edit"])?;
+            }
+            "rebase" => {
+                git(&self.root, ["pull", "--rebase", "--ff"])?;
+            }
+            _ => bail!("Choose ff-only, merge or rebase"),
+        }
+        Ok(())
+    }
+
     pub fn load_state(&self) -> Result<RepoState> {
         let files = parse_status(&git(
             &self.root,
@@ -50,7 +465,7 @@ impl Repository {
             branch: self.current_branch()?,
             files,
             branches: self.branches()?,
-            commits: self.commits()?,
+            commits: self.history(20)?,
             merge_state,
         })
     }
@@ -99,7 +514,8 @@ impl Repository {
             .collect()
     }
 
-    fn commits(&self) -> Result<Vec<CommitEntry>> {
+    pub fn history(&self, limit: usize) -> Result<Vec<CommitEntry>> {
+        let limit = limit.to_string();
         if !self.has_head()? {
             return Ok(Vec::new());
         }
@@ -110,7 +526,9 @@ impl Repository {
                 "--no-color",
                 "-z",
                 "-n",
-                "20",
+                &limit,
+                "--all",
+                "--topo-order",
                 "--date=short",
                 "--format=%H%x00%h%x00%ad%x00%an%x00%s",
             ],
@@ -137,12 +555,155 @@ impl Repository {
             merge_in_progress: self.git_dir.join("MERGE_HEAD").try_exists()?,
             rebase_in_progress: self.git_dir.join("rebase-merge").try_exists()?
                 || self.git_dir.join("rebase-apply").try_exists()?,
+            cherry_pick_in_progress: self.git_dir.join("CHERRY_PICK_HEAD").try_exists()?,
+            revert_in_progress: self.git_dir.join("REVERT_HEAD").try_exists()?,
             conflicts: files
                 .iter()
                 .filter(|file| file.conflicted)
                 .map(|file| file.path.clone())
                 .collect(),
         })
+    }
+
+    fn file_snapshot(&self, file: &FileEntry) -> Result<FileSnapshot> {
+        let mut contents = Vec::new();
+        for path in file.paths() {
+            let full = self.root.join(path);
+            let content = match fs::symlink_metadata(&full) {
+                Ok(metadata) if metadata.file_type().is_symlink() => {
+                    SavedContent::Symlink(fs::read_link(&full)?)
+                }
+                Ok(metadata) if metadata.is_file() => SavedContent::File {
+                    content_hash: self.run_paths(&["hash-object", "--no-filters"], &[path])?,
+                    readonly: metadata.permissions().readonly(),
+                    #[cfg(unix)]
+                    mode: {
+                        use std::os::unix::fs::PermissionsExt;
+                        metadata.permissions().mode()
+                    },
+                },
+                Ok(_) => bail!("Cannot restore directories or special files"),
+                Err(error) if error.kind() == std::io::ErrorKind::NotFound => SavedContent::Missing,
+                Err(error) => return Err(error.into()),
+            };
+            contents.push((path.to_owned(), content));
+        }
+        let head = if self.has_head()? {
+            Some(self.text(&["rev-parse", "HEAD"])?.trim().into())
+        } else {
+            None
+        };
+        Ok(FileSnapshot {
+            index: self.run_paths(&["ls-files", "--stage", "-z"], &file.paths())?,
+            contents,
+            head,
+        })
+    }
+
+    pub fn prepare_restore(&self, file: &FileEntry, from_head: bool) -> Result<RestoreRequest> {
+        ensure!(
+            self.load_state()?
+                .files
+                .iter()
+                .any(|current| current == file),
+            "File status changed; refresh first"
+        );
+        ensure!(
+            !file.conflicted,
+            "Use conflict resolution for conflicted files"
+        );
+        let snapshot = self.file_snapshot(file)?;
+        ensure!(
+            !from_head || file.status == "??" || snapshot.head.is_some(),
+            "HEAD does not exist; unstage the initial file instead"
+        );
+        Ok(RestoreRequest {
+            file: file.clone(),
+            from_head,
+            snapshot,
+        })
+    }
+
+    pub fn restore_file(&self, request: &RestoreRequest) -> Result<()> {
+        ensure!(
+            self.file_snapshot(&request.file)? == request.snapshot,
+            "File or index changed; refresh and confirm again"
+        );
+        if request.file.status == "??" {
+            // Remove only the selected file or symlink. Never follow a symlink or recurse.
+            fs::remove_file(self.root.join(&request.file.path))?;
+        } else if request.from_head {
+            let source = format!(
+                "--source={}",
+                request
+                    .snapshot
+                    .head
+                    .as_deref()
+                    .context("HEAD unavailable")?
+            );
+            self.run_paths(
+                &["restore", &source, "--staged", "--worktree"],
+                &request.file.paths(),
+            )?;
+        } else {
+            self.run_paths(&["restore", "--worktree"], &[&request.file.path])?;
+        }
+        Ok(())
+    }
+
+    fn hunk_diff(&self, file: &FileEntry, staged: bool) -> Result<Vec<u8>> {
+        if file.conflicted || file.original_path.is_some() || file.status == "??" {
+            return Ok(Vec::new());
+        }
+        let mut args = vec![
+            "diff",
+            "--no-color",
+            "--no-ext-diff",
+            "--no-textconv",
+            "--no-renames",
+            "--src-prefix=a/",
+            "--dst-prefix=b/",
+            "--unified=3",
+            "--inter-hunk-context=0",
+        ];
+        if staged {
+            args.push("--cached");
+        }
+        self.run_paths(&args, &[&file.path])
+    }
+
+    pub fn hunks(&self, file: &FileEntry, staged: bool) -> Result<Vec<crate::patch::Hunk>> {
+        Ok(crate::patch::split(
+            file,
+            staged,
+            self.hunk_diff(file, staged)?,
+        ))
+    }
+
+    pub fn apply_hunk(&self, hunk: &crate::patch::Hunk) -> Result<()> {
+        ensure!(
+            self.hunk_diff(&hunk.file, hunk.staged)? == hunk.snapshot,
+            "Diff changed; refresh before applying a hunk"
+        );
+        let mut args = vec!["apply", "--cached", "--whitespace=nowarn"];
+        if hunk.staged {
+            args.push("--reverse");
+        }
+        args.push("-");
+        let mut child = git_command(&self.root, &args)
+            .stdin(Stdio::piped())
+            .stdout(Stdio::piped())
+            .stderr(Stdio::piped())
+            .spawn()?;
+        let written = child
+            .stdin
+            .take()
+            .context("Git apply stdin unavailable")?
+            .write_all(&hunk.patch);
+        let output = child.wait_with_output()?;
+        checked(output)?;
+        written?;
+        Ok(())
     }
 
     pub fn file_detail(&self, file: &FileEntry) -> Result<String> {
@@ -310,6 +871,50 @@ impl Repository {
         Ok(())
     }
 
+    pub fn amend(&self, message: &str) -> Result<()> {
+        ensure!(!message.trim().is_empty(), "Commit message cannot be empty");
+        git(&self.root, ["commit", "--amend", "-m", message])?;
+        Ok(())
+    }
+
+    pub fn rename_branch(&self, old: &str, new: &str) -> Result<()> {
+        git(&self.root, ["check-ref-format", "--branch", new])?;
+        git(&self.root, ["branch", "-m", "--", old, new])?;
+        Ok(())
+    }
+
+    pub fn delete_branch(&self, branch: &str) -> Result<()> {
+        ensure!(
+            branch != self.current_branch()?,
+            "Cannot delete the current branch"
+        );
+        ensure!(
+            !branch.starts_with("release/") && !branch.starts_with("hotfix/"),
+            "Release and hotfix branches are protected"
+        );
+        // Explicit ancestry check avoids branch -d accepting commits merged only in its upstream.
+        let tip = format!("refs/heads/{branch}");
+        let output = git_output(&self.root, ["merge-base", "--is-ancestor", &tip, "HEAD"])?;
+        ensure!(
+            output.status.success(),
+            "Branch contains commits not merged into the current HEAD"
+        );
+        git(&self.root, ["branch", "-d", "--", branch])?;
+        Ok(())
+    }
+
+    pub fn integrate_branch(&self, branch: &str, rebase: bool) -> Result<()> {
+        self.ensure_clean()?;
+        let reference = format!("refs/heads/{branch}");
+        git(&self.root, ["show-ref", "--verify", &reference])?;
+        if rebase {
+            git(&self.root, ["rebase", &reference])?;
+        } else {
+            git(&self.root, ["merge", "--no-edit", &reference])?;
+        }
+        Ok(())
+    }
+
     pub fn switch_branch(&self, name: &str) -> Result<()> {
         git(&self.root, ["switch", "--no-guess", "--", name])?;
         Ok(())
@@ -362,6 +967,45 @@ impl Repository {
         Ok(())
     }
 
+    /// Apply or undo exactly one immutable commit, preserving Git's conflict state.
+    pub fn apply_commit(&self, sha: &str, revert: bool, mainline: Option<usize>) -> Result<()> {
+        self.ensure_clean()?;
+        ensure!(
+            matches!(sha.len(), 40 | 64) && sha.bytes().all(|b| b.is_ascii_hexdigit()),
+            "Select a full commit ID"
+        );
+        let target = format!("{sha}^{{commit}}");
+        let resolved = self.text(&["rev-parse", "--verify", "--end-of-options", &target])?;
+        ensure!(resolved.trim() == sha, "Selected commit changed");
+        let parents = self.text(&["rev-list", "--parents", "-n", "1", sha])?;
+        let count = parents.split_whitespace().count().saturating_sub(1);
+        if count > 1 {
+            ensure!(
+                mainline.is_some_and(|n| n > 0 && n <= count),
+                "Merge commit requires a mainline parent from 1 to {count}"
+            );
+        } else {
+            ensure!(
+                mainline.is_none(),
+                "Mainline is only valid for merge commits"
+            );
+        }
+        let mut args = vec![
+            if revert {
+                "revert".to_owned()
+            } else {
+                "cherry-pick".to_owned()
+            },
+            "--no-edit".into(),
+        ];
+        if let Some(n) = mainline {
+            args.extend(["--mainline".into(), n.to_string()]);
+        }
+        args.extend(["--".into(), sha.to_owned()]);
+        git(&self.root, args)?;
+        Ok(())
+    }
+
     pub fn continue_operation(&self) -> Result<()> {
         let state = self.load_state()?.merge_state;
         ensure!(
@@ -370,10 +1014,14 @@ impl Repository {
         );
         if state.rebase_in_progress {
             git(&self.root, ["rebase", "--continue"])?;
+        } else if state.cherry_pick_in_progress {
+            git(&self.root, ["cherry-pick", "--continue"])?;
+        } else if state.revert_in_progress {
+            git(&self.root, ["revert", "--continue"])?;
         } else if state.merge_in_progress {
             git(&self.root, ["commit", "--no-edit"])?;
         } else {
-            bail!("No merge or rebase in progress");
+            bail!("No Git operation in progress");
         }
         Ok(())
     }
@@ -391,11 +1039,21 @@ impl Repository {
         let state = self.merge_state(&[])?;
         if state.rebase_in_progress {
             git(&self.root, ["rebase", "--abort"])?;
+        } else if state.cherry_pick_in_progress {
+            git(&self.root, ["cherry-pick", "--abort"])?;
+        } else if state.revert_in_progress {
+            git(&self.root, ["revert", "--abort"])?;
         } else if state.merge_in_progress {
             git(&self.root, ["merge", "--abort"])?;
         } else {
-            bail!("No merge or rebase in progress");
+            bail!("No Git operation in progress");
         }
+        Ok(())
+    }
+
+    pub fn fetch_remote(&self, name: &str) -> Result<()> {
+        self.verify_remote(name)?;
+        git(&self.root, ["fetch", "--", name])?;
         Ok(())
     }
 
@@ -419,9 +1077,8 @@ impl Repository {
     }
 
     fn run_paths(&self, args: &[&str], paths: &[&Path]) -> Result<Vec<u8>> {
-        let args: Vec<OsString> = args
-            .iter()
-            .map(OsString::from)
+        let args: Vec<OsString> = std::iter::once(OsString::from("--literal-pathspecs"))
+            .chain(args.iter().map(OsString::from))
             .chain(std::iter::once(OsString::from("--")))
             .chain(paths.iter().map(|path| path.as_os_str().to_owned()))
             .collect();
@@ -433,7 +1090,7 @@ impl Repository {
     }
 }
 
-fn git_output<I, S>(path: &Path, args: I) -> Result<Output>
+fn git_command<I, S>(path: &Path, args: I) -> Command
 where
     I: IntoIterator<Item = S>,
     S: AsRef<OsStr>,
@@ -441,7 +1098,6 @@ where
     let mut command = Command::new("git");
     command
         .arg("--no-pager")
-        .arg("--literal-pathspecs")
         .args([
             "-c",
             "color.ui=false",
@@ -461,6 +1117,10 @@ where
         .env("GIT_SEQUENCE_EDITOR", "true");
     // --repo must win over repository-local variables inherited from hooks or shell scripts.
     for variable in [
+        "GIT_LITERAL_PATHSPECS",
+        "GIT_GLOB_PATHSPECS",
+        "GIT_NOGLOB_PATHSPECS",
+        "GIT_ICASE_PATHSPECS",
         "GIT_DIR",
         "GIT_WORK_TREE",
         "GIT_COMMON_DIR",
@@ -474,6 +1134,14 @@ where
         command.env_remove(variable);
     }
     command
+}
+
+fn git_output<I, S>(path: &Path, args: I) -> Result<Output>
+where
+    I: IntoIterator<Item = S>,
+    S: AsRef<OsStr>,
+{
+    git_command(path, args)
         .output()
         .with_context(|| format!("Failed to execute Git in {}", display_path(path)))
 }

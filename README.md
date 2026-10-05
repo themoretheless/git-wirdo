@@ -5,7 +5,7 @@ branch switching, commits, fetch/pull/push, history, and merge/rebase conflicts.
 
 ## Run
 
-Install a current stable Rust toolchain and Git 2.28 or newer, then from this checkout:
+Install a current stable Rust toolchain and Git 2.36 or newer, then from this checkout:
 
 ```bash
 cargo run --locked -- --repo /path/to/repo
@@ -32,28 +32,28 @@ git-wirdo --repo /path/to/repo
 
 | Key | View | Action |
 | --- | --- | --- |
-| `Tab` | Any | Cycle files → history → branches → conflicts |
+| `Tab` | Any | Cycle views (including workspaces, PRs, stashes and remotes) |
 | `j` / `k`, `↓` / `↑` | Any | Move the selection; the list follows it |
 | `r` | Any | Refresh repository state and the detail pane |
 | `PageUp` / `PageDown` | Any | Scroll details by ten lines |
 | `←` / `→` | Any | Scroll long detail lines horizontally |
-| `/`, then text and `Enter` | Any | Find text in the selected detail pane; `Esc` cancels input |
+| `/`, then text and `Enter` | Any | Search loaded commits in History, otherwise selected details; `Esc` cancels input |
 | `n` | Any | Find the next match, wrapping at the end |
 | `d` | Files | Toggle working changes / upstream merge-base comparison |
 | `v` | Files | Toggle the selected file's Seen mark |
 | `q`, `Ctrl-C` | Any | Quit and restore the terminal |
 | `s` / `u` | Files | Stage / unstage the selected file |
-| `c` | Any | Commit staged changes using `wirdo update` |
-| `b` | Any | Create or switch to `feature/wirdo` |
+| `c` | Any | Enter a message and commit staged changes |
+| `b` | Any | Enter a branch name to create or switch |
 | `Enter` | Branches | Switch to the selected local branch |
 | `f` | Any | Fetch all remotes |
 | `p` | Any | Pull from upstream, **fast-forward only** |
 | `P` | Any | Push using the configured upstream |
 | `o` / `t` | Conflicts | Take ours / theirs and stage the result |
 | `a` | Conflicts | Stage a file after resolving it manually |
-| `e` | Conflicts | Continue the current merge or rebase |
+| `e` | Conflicts | Continue merge, rebase, cherry-pick or revert |
 | `K` | Conflicts | Skip the current rebase commit |
-| `x` | Conflicts | Abort the current merge or rebase |
+| `x` | Conflicts | Abort merge, rebase, cherry-pick or revert |
 
 **Binding change:** lowercase `k` always moves up. Only uppercase `K` skips a
 rebase commit. Staging shortcuts never act on a hidden file selection in another
@@ -89,14 +89,32 @@ before launching the UI. Git credential prompts and interactive Git editors are
 not available inside the TUI. Network operations and hooks are currently
 synchronous and may block the interface while they run.
 
-This refactor deliberately retains the existing terminal layout and the default
-commit message/branch shortcut. Editable commit/branch dialogs, confirmation
-prompts for destructive actions and background Git jobs are separate
-follow-up work, not included in this pass. History currently shows the latest 20
-commits. Use PageUp/PageDown to read long patches.
+Commit and branch names are entered in the TUI. `E` amends the latest commit
+with a replacement message and staged changes. In Branches, `B` renames the
+selected branch; `D` deletes it after typing `delete`. Deletion refuses the
+current branch, release/hotfix branches, branches checked out in another worktree
+and branches containing commits not merged into the current HEAD.
+
+`m` merges the selected branch into the current branch after typing `merge`.
+`z` rebases the current branch onto the selected branch after typing `rebase`.
+Both require a clean working tree. Conflicts remain visible in Conflicts for
+resolution, continuation or abort; they are never silently resolved.
+History begins with 20 commits across local/remote branches in topological order.
+`+` loads another 100 (and keeps the larger window on refresh). `/` searches loaded
+commit IDs, subjects, authors and dates; `n` moves to the next matching commit.
+Use PageUp/PageDown for long patches. The history graph is still pending.
+
+In History, `Y` cherry-picks the selected commit and `Z` reverts it by creating a
+new commit. Confirm the full selected commit ID; leave the mainline field blank
+for ordinary commits, or enter the parent number for a merge commit. Both actions
+require a clean checkout and no unfinished operation. Conflicts are retained in
+Conflicts: resolve and stage, then `e` continues or `x` aborts. `K` remains specific
+to rebase. Reset/reflog recovery are still pending.
+Network operations remain synchronous.
 
 ## Code layout
 
+- `src/patch.rs` — exact-byte hunk separation for selective staging
 - `src/git.rs` — repository discovery, machine-readable Git output, and Git operations
 - `src/model.rs` — repository data and display-safe path labels
 - `src/app.rs` — UI-independent actions, selections, refresh, and error handling
@@ -140,3 +158,151 @@ contents remain identical; edits or removed files clear their marks. Marks are
 independent between working and upstream comparisons and are not saved to disk.
 Search is case-sensitive within the selected details, including commit and
 conflict views. While entering a query, ordinary shortcut letters are text.
+
+## Workspaces and GitHub
+
+Tab cycles Files → History → Branches → Conflicts → Workspaces → PullRequests →
+GitHubRepositories → Stashes → Remotes → RemoteBranches → Tags → Hunks. `O` opens another local repository by path; the previous
+checkout and its files remain on disk. Relative paths are resolved from the
+current repository root. Workspaces are Git linked worktrees, not cloud sessions. Listing uses the
+[NUL-delimited porcelain format](https://git-scm.com/docs/git-worktree/2.36.0),
+so Git 2.36 or newer is required.
+
+In Workspaces, `Enter` opens the selected checkout. `N` asks for a new directory
+and new branch name, then creates a worktree from the current HEAD. `D` asks you
+to type `remove` before removing the selected worktree. The current checkout,
+primary checkout, dirty and locked worktrees cannot be removed. Branches are
+retained, including their unique commits; removal never uses force.
+
+GitHub support uses the GitHub CLI (`gh`), including its stored authentication
+and configured repository selection. Install it and authenticate with:
+
+```bash
+git-wirdo --github-login
+# Or: gh auth login
+```
+
+Login runs outside the TUI so browser/device prompts remain usable. `G` shows
+GitHub authentication status. Without gh or authentication, local Git views still
+work and GitHub errors appear in the detail pane. `r` retries loading the current
+view. With multiple remotes, configure `gh repo set-default` outside the TUI.
+Inherited GH_REPO and repository-local Git environment variables are ignored so
+commands address the checkout opened in Git Wirdo.
+
+PullRequests shows up to 100 open PRs. Selecting a PR loads its description,
+checks, review decision, mergeability, reviews and conversation comments.
+
+| Key | PR action |
+| --- | --- |
+| `Enter` | Checkout the PR; refuses dirty files or an unfinished merge/rebase |
+| `V` | Show its patch; existing scrolling and search work here |
+| `N` | Create a draft PR with title, body, base and published head branch |
+| `A` | Submit an approval with the entered review body |
+| `R` | Submit a request-changes review with the entered body |
+| `C` | Post a conversation comment with the entered body |
+| `M` | Squash merge after typing the selected PR number |
+
+Each input uses Enter to advance and Escape to cancel; ordinary shortcut letters
+are text while a prompt is open. Bodies currently use a single line. Creation
+requires a clean checkout and a head branch already published to GitHub; push it
+first with your upstream configured. Creation does not implicitly push or fork.
+Merge requests match the head SHA shown by the loaded PR list, so changes pushed
+since refresh require refreshing before retrying. GitHub's checks, permissions
+and protection rules apply; no admin bypass or branch deletion is requested.
+Reviews and comments are published when their input is submitted.
+
+GitHubRepositories lists up to 100 repositories owned by the signed-in user.
+Enter asks for a new clone directory, clones that repository and opens it. This
+list does not include every organization or repository shared with the user.
+Network operations are synchronous and may temporarily block the interface.
+Inline review comments, PR editing and repository creation are not implemented.
+
+Read-only CLI output is also available without an interactive terminal:
+
+```bash
+git-wirdo --list-workspaces
+git-wirdo --list-prs
+git-wirdo --pr 123
+git-wirdo --list-github-repos
+```
+
+## Stashes
+
+`S` opens a message prompt and saves tracked, staged and untracked changes;
+ignored files are not included. Saving refuses an unfinished merge/rebase or
+unresolved conflicts. Escape cancels without changing files.
+
+In Stashes, selecting an entry shows its patch including saved untracked files.
+`y` applies it after typing `apply`; `T` pops it after typing `pop`. Both restore
+the saved index with `--index` and require a clean checkout. Apply keeps the
+entry. Pop removes it only on successful restoration; conflicts retain it and
+refresh the file/conflict views. Resolve stash conflicts and stage manually;
+stash conflicts do not have a merge/rebase continuation operation.
+
+`D` asks you to type `drop` to remove the selected entry. The selected stash SHA
+and reflog selector are checked before mutations; if another process has changed
+the list, refresh and reselect. No stash clear operation is exposed.
+`git-wirdo --list-stashes` prints the list without a terminal.
+
+## Remotes and tracking
+
+In Remotes, `N` adds a name and URL. `L` edits the fetch URL; `H` edits the push
+URL separately. Details show all configured fetch and push URLs. `D` requires
+`remove` before removing the remote and its tracking refs; local branches and
+commits remain. `f` fetches the selected remote in this view, and all remotes
+elsewhere. Git credentials and SSH signing remain handled by your Git setup.
+
+`W` asks which remote to publish the current branch to, pushes that branch
+without force and sets its upstream. `U` sets the current branch's upstream;
+submit an empty value to unset it. In RemoteBranches, Enter creates and switches
+to a named local branch tracking the selected ref. Symbolic remote HEAD entries
+are omitted. Failed switches retain existing work under Git's normal protections.
+
+The header shows upstream and ahead/behind counts from locally fetched refs.
+A missing/broken upstream produces an explicit tracking error instead of zero
+counts. Fetch to refresh your knowledge of the remote before comparing.
+
+`p` retains fast-forward-only pull. `l` asks for `ff-only`, `merge` or `rebase`;
+these operations require a clean checkout and explicitly choose the strategy,
+including when pull.ff is configured to only. Merge/rebase conflicts refresh the
+existing Conflicts view for resolution, continuation or abort.
+
+## Tags
+
+In Tags, `N` asks for name, target commit (empty means HEAD), and annotation.
+An empty annotation creates an unsigned lightweight tag; a nonempty annotation
+creates an annotated tag using your Git signing configuration. Configure signing
+credentials beforehand. Existing tags are never overwritten. The detail pane
+shows the selected object and annotation/commit details.
+
+`D` requires `delete` before deleting the local tag. Deletion compares its
+selected object ID atomically, refusing a tag replaced since selection.
+`W` publishes only the selected tag to an entered remote without force.
+`X` asks for a remote and `delete` before removing the remote tag; its expected
+object ID is protected by an explicit force-with-lease. A changed remote tag
+is not deleted. Remote deletion retains the local tag, and local deletion never
+contacts a remote. Working files and branches are unchanged by these actions.
+`git-wirdo --list-tags` prints local tags without starting the TUI.
+
+## Hunks and restoring files
+
+In Files, `i` opens the selected file's Hunks view. `j`/`k` selects a hunk, `s`
+stages an unstaged hunk, and `u` unstages a staged hunk. `d` switches the index
+and working-tree comparisons; Tab returns to Files. The patch shown is the exact
+Git patch used for the index operation. Worktree contents are unchanged.
+If the selected diff has changed since it was loaded, refresh before retrying.
+Context and no-final-newline markers are preserved, as are unusual path bytes.
+
+Hunks are available for ordinary tracked text modifications, staged additions
+and deletions. Binary files, untracked files, renames/copies and mode changes
+use full-file stage/unstage instead. The upstream review comparison does not
+expose staging or discard shortcuts.
+
+In Files, `w` restores the working file from the index, retaining staged edits.
+`D` restores both index and working file from the selected HEAD snapshot. For
+an untracked file either action deletes only that selected file/symlink, never
+its target or sibling files. Both require typing `discard`; Escape cancels.
+The prompt shows the selected path and exact scope. File content, permissions,
+index and HEAD changes since opening the prompt invalidate confirmation. Restore
+refuses conflicted files; use the Conflicts view for those. Before the initial
+commit, unstage a newly staged file instead of requesting a nonexistent HEAD.

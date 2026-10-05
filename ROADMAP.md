@@ -1,0 +1,42 @@
+# Full Git client acceptance
+
+The goal is a usable daily Git client within the existing Rust TUI. Passing tests
+for one milestone does not complete this goal. All entries require user-visible
+operations, recoverable failures, and verification using temporary repositories.
+
+Implemented foundations:
+
+- Repository status, file staging, unstaging, previews and literal paths.
+- Editable commits and branch names; amend, rename and guarded deletion.
+- Merge/rebase start, conflict resolution, continuation and abort.
+- Worktree creation, opening, guarded removal and opening other repositories.
+- GitHub authentication, repository listing/cloning and basic PR lifecycle.
+- Upstream comparison, diff scrolling/search and session review progress.
+- Stash list/save/inspect/apply/pop/confirmed drop, including index and untracked
+  restoration, conflict retention and stale-selector checks.
+
+- Remote configuration, separate fetch/push URLs, branch publication/upstream,
+  remote tracking checkout, ahead/behind state and explicit pull strategies.
+
+- Lightweight/annotated tags: list, inspect, create, publish and guarded local
+  and remote deletion, including compare-and-swap/lease protection.
+
+- Selective tracked-text hunk staging/unstaging with exact-diff validation, and
+  confirmed index/HEAD restoration with file/index snapshots and symlink handling.
+
+- Expandable cross-branch history and metadata search; confirmed cherry-pick and
+  revert (including explicit merge mainline), conflict continuation/abort.
+
+Remaining acceptance work:
+
+- History graph and commit reset with clear modes, reflog and recovery.
+- Long Git/network/hook operations must not freeze the TUI. Show progress, prevent
+  conflicting mutations and implement cancellation with correct process cleanup.
+- GitHub PR editing, ready-for-review, inline review comments, pagination/filtering
+  and selectable merge strategy, without bypassing checks or protection rules.
+- Persist repository/workspace navigation and useful view settings.
+- End-to-end TUI verification for each primary workflow; stable CI checks and
+  platform-specific filename/terminal behavior remain regression requirements.
+
+Known current limits are documented in README. Keep this list honest as features
+are implemented; do not mark an item complete based only on a method or key binding.

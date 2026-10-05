@@ -9,7 +9,7 @@ use crate::model::{ViewMode, display_path};
 
 #[derive(Default)]
 pub struct Ui {
-    lists: [ListState; 4],
+    lists: [ListState; 12],
 }
 
 impl Ui {
@@ -34,7 +34,21 @@ impl Ui {
         let header = Paragraph::new(vec![
             Line::from(Span::styled("Git Wirdo", Style::default().fg(Color::Cyan))),
             Line::from(format!("Repo: {}", display_path(app.repository.root()))),
-            Line::from(format!("Branch: {}", safe_text(&app.state.branch))),
+            Line::from(if let Some(error) = &app.tracking.error {
+                format!(
+                    "Branch: {} | Tracking unavailable: {}",
+                    safe_text(&app.state.branch),
+                    safe_text(error)
+                )
+            } else {
+                format!(
+                    "Branch: {} | {} +{} -{}",
+                    safe_text(&app.state.branch),
+                    safe_text(app.tracking.upstream.as_deref().unwrap_or("no upstream")),
+                    app.tracking.ahead,
+                    app.tracking.behind
+                )
+            }),
             Line::from(format!("View: {:?}", app.view)),
             Line::from(app.state.merge_state.summary().replace('\n', " | ")),
         ])
@@ -74,11 +88,25 @@ impl Ui {
         frame.render_widget(detail, body[1]);
 
         let actions = match app.view {
-            ViewMode::Files => {
-                "s stage | u unstage | c commit | b branch | f fetch | p pull | P push"
+            ViewMode::Hunks => {
+                "s stage unstaged hunk | u unstage staged hunk | d staged/unstaged | tab files"
             }
-            ViewMode::History => "c commit | b branch | f fetch | p pull (ff only) | P push",
-            ViewMode::Branches => "enter switch | b branch | c commit | f fetch | p pull | P push",
+            ViewMode::Tags => "N create | D delete local | W publish | X delete remote | r refresh",
+            ViewMode::Remotes => {
+                "N add | L fetch URL | H push URL | D remove | f fetch | W publish | U upstream | l pull strategy"
+            }
+            ViewMode::RemoteBranches => "enter track | f fetch | U upstream | W publish",
+            ViewMode::Stashes => "S save | y apply | T pop | D drop | r refresh",
+            ViewMode::Files => {
+                "s stage | u unstage | i hunks | w restore index | D discard HEAD | c commit | b branch | f fetch | p pull | P push"
+            }
+            ViewMode::History => "+ older commits | Y cherry-pick | Z revert | c commit",
+            ViewMode::Branches => "enter switch | b new | B rename | D delete | m merge | z rebase",
+            ViewMode::GitHubRepositories => "enter clone | G auth status | O open local repository",
+            ViewMode::Workspaces => "enter open | N create | D remove | O open repository",
+            ViewMode::PullRequests => {
+                "enter checkout | N draft | V diff | M merge | A approve | R changes | C comment"
+            }
             ViewMode::Conflicts => "o ours | t theirs | a resolved | e continue | K skip | x abort",
         };
         let message_style = if app.message_is_error {
@@ -87,7 +115,7 @@ impl Ui {
             Style::default()
         };
         let footer = Paragraph::new(vec![
-            Line::from(if app.searching { format!("Find: {}_ (Enter search, Esc cancel)", safe_text(&app.search)) } else { "tab view | j/k select | PgUp/PgDn diff | / find | n next | d base | v seen | r refresh | q quit".into() }),
+            Line::from(if let Some(prompt) = &app.prompt { format!("{}: {}_ (Enter next, Esc cancel)", prompt.labels[prompt.values.len()], safe_text(&prompt.text)) } else if app.searching { format!("Find: {}_ (Enter search, Esc cancel)", safe_text(&app.search)) } else { "tab view | j/k select | PgUp/PgDn diff | / find | n next | d base | v seen | r refresh | q quit".into() }),
             Line::from(actions),
             Line::from(Span::styled(
                 format!("Action: {}", safe_text(&app.message).replace('\n', " | ")),
@@ -101,6 +129,75 @@ impl Ui {
 
 fn list_items(app: &App) -> (Vec<ListItem<'static>>, bool) {
     let (lines, empty): (Vec<String>, &str) = match app.view {
+        ViewMode::Hunks => (
+            app.hunks
+                .iter()
+                .enumerate()
+                .map(|(i, h)| {
+                    format!(
+                        "{} hunk {}: {}",
+                        if h.staged { "Staged" } else { "Unstaged" },
+                        i + 1,
+                        display_path(&h.file.path)
+                    )
+                })
+                .collect(),
+            "No text hunks",
+        ),
+        ViewMode::Tags => (
+            app.tags
+                .iter()
+                .map(|t| format!("{} [{}] {}", t.name, t.kind, t.subject))
+                .collect(),
+            "No tags",
+        ),
+        ViewMode::Remotes => (
+            app.remotes.iter().map(|r| r.name.clone()).collect(),
+            "No remotes",
+        ),
+        ViewMode::RemoteBranches => (app.remote_branches.clone(), "No remote branches"),
+        ViewMode::Stashes => (
+            app.stashes
+                .iter()
+                .map(|s| format!("{} {}", s.selector, s.subject))
+                .collect(),
+            "No stashes",
+        ),
+        ViewMode::GitHubRepositories => (
+            app.github_repositories
+                .iter()
+                .map(|r| r.name_with_owner.clone())
+                .collect(),
+            "No repositories",
+        ),
+        ViewMode::Workspaces => (
+            app.workspaces
+                .iter()
+                .map(|w| {
+                    format!(
+                        "{} {}{}",
+                        w.branch,
+                        display_path(&w.path),
+                        if w.locked { " [locked]" } else { "" }
+                    )
+                })
+                .collect(),
+            "No workspaces",
+        ),
+        ViewMode::PullRequests => (
+            app.pull_requests
+                .iter()
+                .map(|pr| {
+                    format!(
+                        "#{} {}{}",
+                        pr.number,
+                        pr.title,
+                        if pr.is_draft { " [draft]" } else { "" }
+                    )
+                })
+                .collect(),
+            "No open pull requests",
+        ),
         ViewMode::Files => (
             app.displayed_files()
                 .iter()
