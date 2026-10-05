@@ -178,6 +178,54 @@ impl Repository {
         })
     }
 
+    /// Compare the working tree to the merge base with its configured upstream.
+    pub fn upstream_files(&self) -> Result<Vec<FileEntry>> {
+        let base = self.upstream_base()?;
+        let bytes = git(
+            &self.root,
+            ["diff", "--name-status", "--no-renames", "-z", &base, "--"],
+        )?;
+        let mut records = bytes.split(|byte| *byte == 0);
+        let mut files = Vec::new();
+        while let Some(status) = records.next().filter(|status| !status.is_empty()) {
+            let path = records.next().context("Missing upstream diff path")?;
+            files.push(FileEntry {
+                path: path_from_bytes(path)?,
+                original_path: None,
+                status: utf8_line(status)?,
+                staged: false,
+                unstaged: false,
+                conflicted: false,
+            });
+        }
+        Ok(files)
+    }
+
+    fn upstream_base(&self) -> Result<String> {
+        let upstream = self
+            .text(&["rev-parse", "--symbolic-full-name", "@{upstream}"])
+            .context("Configure an upstream branch before comparing changes")?;
+        Ok(self
+            .text(&["merge-base", "HEAD", upstream.trim()])?
+            .trim()
+            .to_owned())
+    }
+
+    pub fn upstream_detail(&self, file: &FileEntry) -> Result<String> {
+        let base = self.upstream_base()?;
+        self.path_text(
+            &[
+                "diff",
+                "--no-color",
+                "--no-ext-diff",
+                "--no-textconv",
+                "--no-renames",
+                &base,
+            ],
+            &[&file.path],
+        )
+    }
+
     fn untracked_preview(&self, path: &Path) -> Result<String> {
         let full_path = self.root.join(path);
         let metadata = fs::symlink_metadata(&full_path)

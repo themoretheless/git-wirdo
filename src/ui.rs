@@ -53,9 +53,24 @@ impl Ui {
         state.select(has_selection.then_some(app.selection()));
         frame.render_stateful_widget(list, body[0], state);
 
+        let title = if app.view == ViewMode::Files {
+            let files = app.displayed_files();
+            format!(
+                "{} | Seen {}/{}",
+                if app.upstream_comparison {
+                    "Upstream"
+                } else {
+                    "Working changes"
+                },
+                files.iter().filter(|file| app.file_seen(file)).count(),
+                files.len()
+            )
+        } else {
+            "Details".into()
+        };
         let detail = Paragraph::new(safe_text(&app.detail_text))
-            .block(Block::default().borders(Borders::ALL).title("Details"))
-            .wrap(Wrap { trim: false });
+            .block(Block::default().borders(Borders::ALL).title(title))
+            .scroll((app.detail_scroll, app.detail_column));
         frame.render_widget(detail, body[1]);
 
         let actions = match app.view {
@@ -72,7 +87,7 @@ impl Ui {
             Style::default()
         };
         let footer = Paragraph::new(vec![
-            Line::from("tab view | j/k or arrows select | r refresh | q / Ctrl-C quit"),
+            Line::from(if app.searching { format!("Find: {}_ (Enter search, Esc cancel)", safe_text(&app.search)) } else { "tab view | j/k select | PgUp/PgDn diff | / find | n next | d base | v seen | r refresh | q quit".into() }),
             Line::from(actions),
             Line::from(Span::styled(
                 format!("Action: {}", safe_text(&app.message).replace('\n', " | ")),
@@ -87,8 +102,7 @@ impl Ui {
 fn list_items(app: &App) -> (Vec<ListItem<'static>>, bool) {
     let (lines, empty): (Vec<String>, &str) = match app.view {
         ViewMode::Files => (
-            app.state
-                .files
+            app.displayed_files()
                 .iter()
                 .map(|file| {
                     let marker = match (file.staged, file.unstaged) {
@@ -97,7 +111,12 @@ fn list_items(app: &App) -> (Vec<ListItem<'static>>, bool) {
                         (false, true) => " U",
                         (false, false) => "  ",
                     };
-                    format!("[{marker}] [{}] {}", file.status, file.label())
+                    format!(
+                        "[{marker}] [{}] {}{}",
+                        file.status,
+                        file.label(),
+                        if app.file_seen(file) { " [seen]" } else { "" }
+                    )
                 })
                 .collect(),
             "No changes",

@@ -35,6 +35,12 @@ git-wirdo --repo /path/to/repo
 | `Tab` | Any | Cycle files → history → branches → conflicts |
 | `j` / `k`, `↓` / `↑` | Any | Move the selection; the list follows it |
 | `r` | Any | Refresh repository state and the detail pane |
+| `PageUp` / `PageDown` | Any | Scroll details by ten lines |
+| `←` / `→` | Any | Scroll long detail lines horizontally |
+| `/`, then text and `Enter` | Any | Find text in the selected detail pane; `Esc` cancels input |
+| `n` | Any | Find the next match, wrapping at the end |
+| `d` | Files | Toggle working changes / upstream merge-base comparison |
+| `v` | Files | Toggle the selected file's Seen mark |
 | `q`, `Ctrl-C` | Any | Quit and restore the terminal |
 | `s` / `u` | Files | Stage / unstage the selected file |
 | `c` | Any | Commit staged changes using `wirdo update` |
@@ -85,9 +91,9 @@ synchronous and may block the interface while they run.
 
 This refactor deliberately retains the existing terminal layout and the default
 commit message/branch shortcut. Editable commit/branch dialogs, confirmation
-prompts for destructive actions, diff paging, and background Git jobs are separate
+prompts for destructive actions and background Git jobs are separate
 follow-up work, not included in this pass. History currently shows the latest 20
-commits. For long patches, use `git diff` / `git show` outside the UI.
+commits. Use PageUp/PageDown to read long patches.
 
 ## Code layout
 
@@ -117,3 +123,20 @@ renames, branch-switch failures, detached HEAD, worktrees, modify/delete conflic
 merge/rebase continuation and abort, state refresh after partial failures, key
 bindings, terminal rendering, and the CLI. CI runs formatting, Clippy, and tests on
 Linux, macOS, and Windows.
+
+## Reviewing changes
+
+Inspired by Delta's review workflow, `d` compares tracked working-tree files with
+`merge-base HEAD @{upstream}`. This includes committed branch changes and pending
+tracked edits, while excluding changes made only on the upstream branch after
+it diverged. Configure the upstream with `git branch --set-upstream-to=<ref>`.
+Comparison uses locally available refs; press `f` to fetch before reviewing.
+Untracked files remain in the working-changes view. Stage/unstage shortcuts act
+only in that view, so reviewing a committed change cannot modify the index.
+
+`v` marks a file Seen for the current comparison during this session. The header
+shows review progress. Refresh retains marks only while the file's displayed
+contents remain identical; edits or removed files clear their marks. Marks are
+independent between working and upstream comparisons and are not saved to disk.
+Search is case-sensitive within the selected details, including commit and
+conflict views. While entering a query, ordinary shortcut letters are text.

@@ -13,7 +13,6 @@ use ratatui::backend::CrosstermBackend;
 
 use git_wirdo::app::App;
 use git_wirdo::git::Repository;
-use git_wirdo::input::action_for_key;
 use git_wirdo::ui::Ui;
 
 struct TerminalGuard;
@@ -59,9 +58,8 @@ pub fn run(repository: Repository) -> Result<()> {
         terminal.draw(|frame| ui.draw(frame, &app))?;
         if event::poll(Duration::from_millis(100))?
             && let Event::Key(key) = event::read()?
-            && let Some(action) = action_for_key(key)
         {
-            app.handle(action);
+            app.handle_key(key);
         }
     }
     Ok(())

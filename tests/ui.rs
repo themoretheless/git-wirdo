@@ -54,3 +54,23 @@ fn small_terminals_have_a_safe_fallback() {
     let app = App::new(fixture.open()).unwrap();
     assert!(screen(&app, 40, 10).contains("Terminal too small"));
 }
+
+#[test]
+fn diff_paging_and_seen_progress_are_visible() {
+    let fixture = TestRepo::new();
+    fixture.write(
+        "file",
+        &(0..40)
+            .map(|i| format!("unique-line-{i:02}\n"))
+            .collect::<String>(),
+    );
+    let mut app = App::new(fixture.open()).unwrap();
+    app.handle(Action::ToggleSeen);
+    let rendered = screen(&app, 120, 24);
+    assert!(rendered.contains("Seen 1/1"));
+    assert!(rendered.contains("[seen]"));
+    app.handle(Action::PageDown);
+    let rendered = screen(&app, 120, 24);
+    assert!(rendered.contains("unique-line-09"));
+    assert!(!rendered.contains("unique-line-00"));
+}

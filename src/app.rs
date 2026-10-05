@@ -1,4 +1,8 @@
+use crate::model::FileEntry;
 use anyhow::{Context, Result};
+use crossterm::event::{KeyCode, KeyEvent, KeyEventKind, KeyModifiers};
+use std::collections::HashMap;
+use std::path::PathBuf;
 
 use crate::git::{ConflictSide, Repository};
 use crate::model::{RepoState, ViewMode, display_path};
@@ -10,6 +14,14 @@ const DEFAULT_BRANCH_NAME: &str = "feature/wirdo";
 /// UI-independent commands; terminal key bindings live in `input`.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Action {
+    ScrollLeft,
+    ScrollRight,
+    PageDown,
+    PageUp,
+    ToggleComparison,
+    ToggleSeen,
+    Search,
+    NextMatch,
     Quit,
     Refresh,
     NextView,
@@ -44,6 +56,13 @@ pub struct App {
     pub message: String,
     pub message_is_error: bool,
     pub running: bool,
+    pub detail_scroll: u16,
+    pub detail_column: u16,
+    pub upstream_comparison: bool,
+    pub review_files: Vec<FileEntry>,
+    pub seen: HashMap<(bool, PathBuf), String>,
+    pub search: String,
+    pub searching: bool,
 }
 
 impl App {
@@ -61,6 +80,13 @@ impl App {
             message: "Ready".to_owned(),
             message_is_error: false,
             running: true,
+            detail_scroll: 0,
+            detail_column: 0,
+            upstream_comparison: false,
+            review_files: Vec::new(),
+            seen: HashMap::new(),
+            search: String::new(),
+            searching: false,
         };
         app.refresh_detail();
         Ok(app)
@@ -69,9 +95,38 @@ impl App {
     pub fn refresh(&mut self) -> Result<()> {
         // Keep the previous snapshot intact if reading the repository fails.
         self.state = self.repository.load_state()?;
+        if self.upstream_comparison {
+            self.review_files = self.repository.upstream_files()?;
+        }
+        let upstream_files = if self.seen.keys().any(|(upstream, _)| *upstream) {
+            self.repository.upstream_files().unwrap_or_default()
+        } else {
+            Vec::new()
+        };
+        let mut valid = HashMap::new();
+        for ((upstream, path), previous) in &self.seen {
+            let files = if *upstream {
+                &upstream_files
+            } else {
+                &self.state.files
+            };
+            if let Some(file) = files.iter().find(|file| &file.path == path) {
+                let detail = if *upstream {
+                    self.repository.upstream_detail(file)
+                } else {
+                    self.repository.file_detail(file)
+                };
+                if let Ok(detail) = detail
+                    && &detail == previous
+                {
+                    valid.insert((*upstream, path.clone()), detail);
+                }
+            }
+        }
+        self.seen = valid;
         self.file_selection = self
             .file_selection
-            .min(self.state.files.len().saturating_sub(1));
+            .min(self.displayed_files().len().saturating_sub(1));
         self.history_selection = self
             .history_selection
             .min(self.state.commits.len().saturating_sub(1));
@@ -95,8 +150,9 @@ impl App {
     }
 
     fn move_selection(&mut self, delta: isize) {
+        let file_len = self.displayed_files().len();
         let (selection, len) = match self.view {
-            ViewMode::Files => (&mut self.file_selection, self.state.files.len()),
+            ViewMode::Files => (&mut self.file_selection, file_len),
             ViewMode::History => (&mut self.history_selection, self.state.commits.len()),
             ViewMode::Branches => (&mut self.branch_selection, self.state.branches.len()),
             ViewMode::Conflicts => (
@@ -111,6 +167,8 @@ impl App {
     }
 
     fn refresh_detail(&mut self) {
+        self.detail_scroll = 0;
+        self.detail_column = 0;
         self.detail_text = self
             .selected_detail()
             .unwrap_or_else(|error| format!("Cannot load details:\n{error:#}"));
@@ -118,7 +176,8 @@ impl App {
 
     fn selected_detail(&self) -> Result<String> {
         match self.view {
-            ViewMode::Files => match self.state.files.get(self.file_selection) {
+            ViewMode::Files => match self.displayed_files().get(self.file_selection) {
+                Some(file) if self.upstream_comparison => self.repository.upstream_detail(file),
                 Some(file) => self.repository.file_detail(file),
                 None => Ok("No files selected".to_owned()),
             },
@@ -157,9 +216,73 @@ impl App {
         }
     }
 
+    pub fn displayed_files(&self) -> &[FileEntry] {
+        if self.upstream_comparison {
+            &self.review_files
+        } else {
+            &self.state.files
+        }
+    }
+
+    pub fn file_seen(&self, file: &FileEntry) -> bool {
+        self.seen
+            .contains_key(&(self.upstream_comparison, file.path.clone()))
+    }
+
+    pub fn handle_key(&mut self, key: KeyEvent) {
+        if key.kind != KeyEventKind::Press {
+            return;
+        }
+        if self.searching
+            && !key
+                .modifiers
+                .intersects(KeyModifiers::CONTROL | KeyModifiers::ALT)
+        {
+            match key.code {
+                KeyCode::Esc => self.searching = false,
+                KeyCode::Enter => {
+                    self.searching = false;
+                    self.find_match(false);
+                }
+                KeyCode::Backspace => {
+                    self.search.pop();
+                }
+                KeyCode::Char(c) => self.search.push(c),
+                _ => {}
+            }
+        } else if let Some(action) = crate::input::action_for_key(key) {
+            self.handle(action);
+        }
+    }
+
+    fn find_match(&mut self, next: bool) {
+        if self.search.is_empty() {
+            return;
+        }
+        let start = if next {
+            usize::from(self.detail_scroll) + 1
+        } else {
+            0
+        };
+        let lines: Vec<_> = self.detail_text.lines().collect();
+        let found = (start..lines.len())
+            .chain(0..start.min(lines.len()))
+            .find(|index| lines[*index].contains(&self.search));
+        self.detail_column = 0;
+        if let Some(line) = found {
+            self.detail_scroll = line.min(u16::MAX as usize) as u16;
+        }
+        self.message = if found.is_some() {
+            format!("Find: {}", self.search)
+        } else {
+            format!("No match: {}", self.search)
+        };
+    }
+
     /// Git failures are recoverable UI messages, not reasons to leave the terminal in raw mode.
     pub fn handle(&mut self, action: Action) {
         if let Err(error) = self.apply(action) {
+            self.detail_scroll = 0;
             self.message = format!("{error:#}");
             self.detail_text = format!("Action failed\n\n{}", self.message);
             self.message_is_error = true;
@@ -168,6 +291,56 @@ impl App {
 
     fn apply(&mut self, action: Action) -> Result<()> {
         match action {
+            Action::ScrollLeft => self.detail_column = self.detail_column.saturating_sub(10),
+            Action::ScrollRight => {
+                self.detail_column = self.detail_column.saturating_add(10).min(
+                    self.detail_text
+                        .lines()
+                        .map(|line| line.chars().count())
+                        .max()
+                        .unwrap_or(0)
+                        .min(u16::MAX as usize) as u16,
+                )
+            }
+            Action::PageDown => {
+                self.detail_scroll = self.detail_scroll.saturating_add(10).min(
+                    self.detail_text
+                        .lines()
+                        .count()
+                        .saturating_sub(1)
+                        .min(u16::MAX as usize) as u16,
+                )
+            }
+            Action::PageUp => self.detail_scroll = self.detail_scroll.saturating_sub(10),
+            Action::Search => {
+                self.searching = true;
+                self.search.clear();
+            }
+            Action::NextMatch => self.find_match(true),
+            Action::ToggleComparison if self.view == ViewMode::Files => {
+                if !self.upstream_comparison {
+                    self.review_files = self.repository.upstream_files()?;
+                }
+                self.upstream_comparison = !self.upstream_comparison;
+                self.file_selection = 0;
+                self.refresh_detail();
+                self.message = if self.upstream_comparison {
+                    "Compared with upstream merge base"
+                } else {
+                    "Working changes"
+                }
+                .into();
+                self.message_is_error = false;
+            }
+            Action::ToggleSeen if self.view == ViewMode::Files => {
+                if let Some(file) = self.displayed_files().get(self.file_selection) {
+                    let key = (self.upstream_comparison, file.path.clone());
+                    if self.seen.remove(&key).is_none() {
+                        let detail = self.selected_detail()?;
+                        self.seen.insert(key, detail);
+                    }
+                }
+            }
             Action::Quit => self.running = false,
             Action::Refresh => {
                 self.refresh()?;
@@ -189,12 +362,12 @@ impl App {
                     )?;
                 }
             }
-            Action::Stage if self.view == ViewMode::Files => {
+            Action::Stage if self.view == ViewMode::Files && !self.upstream_comparison => {
                 if let Some(file) = self.state.files.get(self.file_selection).cloned() {
                     self.run_action(|repo| repo.stage(&file), format!("Staged {}", file.label()))?;
                 }
             }
-            Action::Unstage if self.view == ViewMode::Files => {
+            Action::Unstage if self.view == ViewMode::Files && !self.upstream_comparison => {
                 if let Some(file) = self.state.files.get(self.file_selection).cloned() {
                     self.run_action(
                         |repo| repo.unstage(&file),

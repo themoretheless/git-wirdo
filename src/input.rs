@@ -17,6 +17,14 @@ pub fn action_for_key(key: KeyEvent) -> Option<Action> {
         return None;
     }
     Some(match key.code {
+        KeyCode::Left => Action::ScrollLeft,
+        KeyCode::Right => Action::ScrollRight,
+        KeyCode::PageDown => Action::PageDown,
+        KeyCode::PageUp => Action::PageUp,
+        KeyCode::Char('d') => Action::ToggleComparison,
+        KeyCode::Char('v') => Action::ToggleSeen,
+        KeyCode::Char('/') => Action::Search,
+        KeyCode::Char('n') => Action::NextMatch,
         KeyCode::Char('q') => Action::Quit,
         KeyCode::Char('r') => Action::Refresh,
         KeyCode::Tab => Action::NextView,
