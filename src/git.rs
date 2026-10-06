@@ -1580,7 +1580,15 @@ fn lifecycle_destination(base: &Path, path: &Path) -> Result<PathBuf> {
     let destination = if path.is_absolute() {
         path.to_owned()
     } else {
-        fs::canonicalize(base)?.join(path)
+        // canonicalize adds a Windows verbatim prefix which Git's mkdir rejects.
+        // Resolve the base without changing its native representation; canonicalize
+        // only below when comparing existing metadata directories.
+        let base = if base.is_absolute() {
+            base.to_owned()
+        } else {
+            std::env::current_dir()?.join(base)
+        };
+        base.join(path)
     };
     match fs::symlink_metadata(&destination) {
         Ok(metadata) => ensure!(
