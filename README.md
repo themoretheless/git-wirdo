@@ -102,7 +102,9 @@ resolution, continuation or abort; they are never silently resolved.
 History begins with 20 commits across local/remote branches in topological order.
 `+` loads another 100 (and keeps the larger window on refresh). `/` searches loaded
 commit IDs, subjects, authors and dates; `n` moves to the next matching commit.
-Use PageUp/PageDown for long patches. `g` toggles the branch/merge graph in the detail pane; j/k highlights the selected commit.
+Commit details show authorship/commit dates, the complete message, statistics and
+the patch. Use PageUp/PageDown for long patches. `g` toggles the branch/merge graph
+in the detail pane; j/k highlights the selected commit.
 
 In History, `Y` cherry-picks the selected commit and `Z` reverts it by creating a
 new commit. Confirm the full selected commit ID; leave the mainline field blank
@@ -400,3 +402,18 @@ its owner before removing it. No lock is removed automatically.
 Repository validation and initial status loading occur before entering the TUI.
 CLI inspection options remain synchronous. Windows code is checked by cross
 compilation; native Windows cancellation still requires its CI/runtime checks.
+
+## Terminal acceptance checks
+
+On Unix, `cargo test --locked --test terminal_workflows --test terminal_github`
+drives the real binary through a PTY, reconstructs its displayed screen, and
+checks independent Git refs/index/working files after each workflow. It covers
+staging, commits/amend, branches, selective hunks, restore, stash, merge/rebase,
+cherry-pick/revert conflicts, remotes/tracking, tags, history/graph, reset/reflog
+and linked worktree navigation/removal. Tests also check terminal-mode restoration.
+
+GitHub acceptance uses a strict offline `gh` executable fixture and temporary
+repositories. It checks CLI arguments, JSON stdin, multiline forms, pagination,
+head/line guards, PR lifecycle and real local checkout/clone; it publishes no live
+reviews/comments and does not prove server permissions or policy acceptance.
+`terminal_background` separately checks hook cancellation and saved-state restart.

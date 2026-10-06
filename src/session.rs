@@ -14,6 +14,7 @@ use std::thread::{self, JoinHandle};
 use std::time::Instant;
 
 struct Job {
+    scroll_revision: u64,
     worker: JoinHandle<App>,
     control: Arc<Control>,
     closing: Arc<AtomicBool>,
@@ -21,12 +22,17 @@ struct Job {
     description: String,
 }
 pub struct Session {
+    scroll_revision: u64,
     pub app: App,
     job: Option<Job>,
 }
 impl Session {
     pub fn new(app: App) -> Self {
-        Self { app, job: None }
+        Self {
+            app,
+            job: None,
+            scroll_revision: 0,
+        }
     }
     pub fn busy(&self) -> bool {
         self.job.is_some()
@@ -49,7 +55,9 @@ impl Session {
         let job = self.job.take().unwrap();
         match job.worker.join() {
             Ok(mut updated) => {
-                if updated.detail_text == self.app.detail_text {
+                if updated.detail_text == self.app.detail_text
+                    && job.scroll_revision != self.scroll_revision
+                {
                     updated.detail_scroll = self.app.detail_scroll;
                     updated.detail_column = self.app.detail_column;
                 }
@@ -81,11 +89,17 @@ impl Session {
                 job.control.cancel();
             } else if key.code == KeyCode::Esc {
                 job.control.cancel();
-            } else if matches!(
-                action_for_key(key),
-                Some(Action::PageDown | Action::PageUp | Action::ScrollLeft | Action::ScrollRight)
-            ) {
-                self.app.handle_key(key);
+            } else if let Some(
+                action @ (Action::PageDown
+                | Action::PageUp
+                | Action::ScrollLeft
+                | Action::ScrollRight),
+            ) = action_for_key(key)
+            {
+                self.scroll_revision = self.scroll_revision.wrapping_add(1);
+                // The displayed snapshot may still contain the submitted form.
+                // Busy viewport keys must not be swallowed by modal input.
+                self.app.handle(action);
             }
             return;
         }
@@ -124,6 +138,7 @@ impl Session {
             updated
         });
         self.job = Some(Job {
+            scroll_revision: self.scroll_revision,
             worker,
             control,
             closing,

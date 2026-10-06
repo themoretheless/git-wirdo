@@ -67,6 +67,55 @@ fn asynchronous_navigation_and_refresh_return_updated_snapshots() {
     assert!(session.app.graph_visible && session.app.detail_text.contains("*"));
 }
 
+#[test]
+fn completed_search_and_next_match_keep_the_workers_selected_viewport() {
+    let repo = TestRepo::new();
+    repo.write(
+        "file",
+        (0..100)
+            .map(|n| format!("old {n}\n"))
+            .collect::<String>()
+            .as_str(),
+    );
+    repo.commit_all("base");
+    let changed = (0..100)
+        .map(|n| match n {
+            5 => "needle FIRST\n".into(),
+            80 => "needle SECOND\n".into(),
+            _ => format!("new {n}\n"),
+        })
+        .collect::<String>();
+    repo.write("file", &changed);
+    let mut session = Session::new(App::new(repo.open()).unwrap());
+    session.handle_key(key('/'));
+    session.handle_paste("needle");
+    session.handle_key(KeyEvent::new(KeyCode::Enter, KeyModifiers::NONE));
+    finish(&mut session);
+    let first = session.app.detail_scroll;
+    assert!(first > 0);
+    assert!(
+        session
+            .app
+            .detail_text
+            .lines()
+            .nth(usize::from(first))
+            .unwrap()
+            .contains("needle FIRST")
+    );
+    session.handle_key(key('n'));
+    finish(&mut session);
+    assert!(session.app.detail_scroll > first);
+    assert!(
+        session
+            .app
+            .detail_text
+            .lines()
+            .nth(usize::from(session.app.detail_scroll))
+            .unwrap()
+            .contains("needle SECOND")
+    );
+}
+
 fn sleeping_command() -> std::process::Command {
     #[cfg(unix)]
     {
@@ -167,12 +216,15 @@ fn hook_can_be_cancelled_without_committing_and_tui_remains_usable() {
     let head = r.git(&["rev-parse", "HEAD"]);
     session.handle_key(KeyEvent::new(KeyCode::PageDown, KeyModifiers::NONE));
     assert!(session.busy() && session.app.running);
+    let scrolled = session.app.detail_scroll;
+    assert!(scrolled > 0);
     session.handle_key(KeyEvent::new(KeyCode::Esc, KeyModifiers::NONE));
     finish(&mut session);
     assert!(session.app.message_is_error && session.app.message.contains("cancelled"));
     assert_eq!(r.git(&["rev-parse", "HEAD"]), head);
     assert_eq!(r.git(&["show", ":file"]), "staged");
     assert!(session.app.state.files.iter().any(|f| f.staged));
+    assert_eq!(session.app.detail_scroll, scrolled);
     assert_descendant_stopped(&r);
     session.handle_key(key('r'));
     finish(&mut session);

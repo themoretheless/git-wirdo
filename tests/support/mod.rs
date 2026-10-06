@@ -1,5 +1,8 @@
 #![allow(dead_code)]
 
+#[cfg(unix)]
+pub mod terminal;
+
 use std::fs;
 use std::path::{Path, PathBuf};
 use std::process::{Command, Output};

@@ -45,13 +45,24 @@ Implemented foundations:
   locked state merging preserves other clients' roots and damaged settings.
   Restart and damaged-state behavior verified through a real Unix PTY.
 
+- Primary Unix terminal workflows verified using the actual binary, a reconstructed
+  VT screen, and independent Git index/files/refs: staging/commits/branches, hunks
+  and restore, stash, merge/rebase/cherry-pick/revert conflict resolution and abort,
+  remotes/tracking/tags, history/patch/graph/search, reset/reflog, and worktrees.
+  Offline GitHub CLI acceptance covers PR forms, paginated diffs/comments,
+  head/line guards, creation/checkout, repository listing and local clone.
+
 Remaining acceptance work:
 
 - Complete native Windows runtime verification of background process-tree
   cancellation (cross compilation alone does not prove behavior).
 
-- End-to-end TUI verification for each primary workflow; stable CI checks and
-  platform-specific filename/terminal behavior remain regression requirements.
+- Stable CI checks and native platform-specific filename/terminal behavior
+  remain regression requirements; Unix terminal acceptance is covered above.
+
+- Repository lifecycle: initialize a new repository, clone an arbitrary Git
+  URL/local repository, and start outside an existing checkout. Current entrypoints
+  open existing worktrees; cloning currently goes through the GitHub repository list.
 
 Known current limits are documented in README. Keep this list honest as features
 are implemented; do not mark an item complete based only on a method or key binding.

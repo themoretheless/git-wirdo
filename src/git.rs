@@ -888,11 +888,13 @@ impl Repository {
         self.text(&[
             "show",
             "--no-color",
+            "--no-show-signature",
             "--no-ext-diff",
             "--no-textconv",
             "--stat",
+            "--patch",
             "--decorate=short",
-            "--oneline",
+            "--format=fuller",
             &commit.sha,
             "--",
         ])
