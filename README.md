@@ -444,3 +444,16 @@ repositories. It checks CLI arguments, JSON stdin, multiline forms, pagination,
 head/line guards, PR lifecycle and real local checkout/clone; it publishes no live
 reviews/comments and does not prove server permissions or policy acceptance.
 `terminal_background` separately checks hook cancellation and saved-state restart.
+
+`terminal_lifecycle` covers startup outside a checkout, initialization, arbitrary
+clone, a full recent-root list, cancellation and quit during transfer. The Unix
+suite has been executed on macOS and in an aarch64 Linux container (Rust 1.98.0,
+Git 2.39.5): all 183 Linux tests and strict all-target Clippy passed, including the
+Linux-only non-UTF8 filesystem case. Linux PTY setup uses the platform's actual
+`openpty` pointer signature without weakening lint checks.
+
+On Windows, `cargo test --locked --test windows_process` exercises forced Job
+Object cancellation and normal parent exit with a descendant holding inherited
+pipes. The cancellation test opens a native process handle before stopping the
+job and checks that it becomes signalled. These fixtures cross-compile, but have
+not yet been executed on a Windows host; the CI/runtime gate remains open.

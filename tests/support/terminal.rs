@@ -80,7 +80,7 @@ impl TerminalFixture {
                     &mut slave,
                     std::ptr::null_mut(),
                     std::ptr::null_mut(),
-                    &mut size,
+                    &raw mut size,
                 )
             },
             0
@@ -242,7 +242,7 @@ impl TerminalFixture {
                 libc::ioctl(
                     self.slave.as_ref().unwrap().as_raw_fd(),
                     libc::TIOCSWINSZ,
-                    &mut size,
+                    &raw mut size,
                 )
             },
             0

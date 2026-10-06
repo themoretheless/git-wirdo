@@ -51,7 +51,7 @@ fn state_pty(repo: &TestRepo, path: &std::path::Path) -> Pty {
                 &mut slave,
                 std::ptr::null_mut(),
                 std::ptr::null_mut(),
-                &mut size,
+                &raw mut size,
             )
         },
         0
@@ -205,7 +205,7 @@ fn actual_terminal_stays_responsive_during_hook_and_quits_with_restored_modes() 
                 &mut slave,
                 std::ptr::null_mut(),
                 std::ptr::null_mut(),
-                &mut size,
+                &raw mut size,
             )
         },
         0

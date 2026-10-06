@@ -57,13 +57,20 @@ Implemented foundations:
   Recent-root operations and the startup screen are covered through a real Unix
   terminal, including recoverable errors, cancellation and terminal restoration.
 
+- Linux aarch64 runtime acceptance (Rust 1.98.0, Git 2.39.5): strict all-target
+  Clippy and all 183 tests passed, including real PTY workflows, background hooks,
+  lifecycle cancellation and non-UTF8 filesystem paths. macOS terminal workflows
+  passed again after fixing the platform-specific PTY argument type.
+
 Remaining acceptance work:
 
 - Complete native Windows runtime verification of background process-tree
-  cancellation (cross compilation alone does not prove behavior).
+  cancellation and cleanup after parent exit. Native process-handle fixtures are
+  prepared and cross-compile; cross compilation alone does not prove behavior.
 
-- Stable CI checks and native platform-specific filename/terminal behavior
-  remain regression requirements; Unix terminal acceptance is covered above.
+- Successful hosted CI checks for the platform matrix remain a regression gate;
+  current Unix runtime evidence is local macOS and Linux execution. Native Windows
+  filename/terminal behavior remains unverified.
 
 Known current limits are documented in README. Keep this list honest as features
 are implemented; do not mark an item complete based only on a method or key binding.
