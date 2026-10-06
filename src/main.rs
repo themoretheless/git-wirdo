@@ -1,4 +1,5 @@
 mod terminal;
+mod welcome;
 
 use std::env;
 use std::path::PathBuf;
@@ -26,6 +27,21 @@ struct Cli {
     /// A working tree or any directory inside it (defaults to the current directory).
     #[arg(long, value_name = "PATH")]
     repo: Option<PathBuf>,
+    /// Initialize a new repository, retaining existing ordinary files.
+    #[arg(long, value_name = "PATH", conflicts_with_all = ["repo", "resume", "clone", "inspection", "github_login"])]
+    init: Option<PathBuf>,
+    /// Initial branch used with --init.
+    #[arg(long, default_value = "main", requires = "init")]
+    initial_branch: String,
+    /// Clone an arbitrary Git URL or local repository.
+    #[arg(long, value_name = "SOURCE", requires = "destination", conflicts_with_all = ["repo", "resume", "init", "inspection", "github_login"])]
+    clone: Option<std::ffi::OsString>,
+    /// New or empty directory used with --clone.
+    #[arg(long, value_name = "PATH", requires = "clone")]
+    destination: Option<PathBuf>,
+    /// Start with repository selection, even inside an existing checkout.
+    #[arg(long, conflicts_with_all = ["repo", "resume", "init", "clone", "inspection", "github_login", "headless"])]
+    start: bool,
     /// Authenticate GitHub CLI interactively before opening the TUI.
     #[arg(long)]
     github_login: bool,
@@ -89,8 +105,9 @@ fn main() -> Result<()> {
         }
         return Ok(());
     }
-    let path = match cli.repo {
-        Some(path) => path,
+    let explicit_repo = cli.repo.is_some();
+    let path = match &cli.repo {
+        Some(path) => path.clone(),
         None if cli.resume => git_wirdo::settings::load(&settings_path()?)?
             .repositories
             .first()
@@ -99,7 +116,62 @@ fn main() -> Result<()> {
             .path()?,
         None => env::current_dir().context("Cannot determine the current directory")?,
     };
-    let repository = Repository::open(&path)?;
+    let start = || {
+        welcome::run(
+            path.clone(),
+            if cli.no_state {
+                None
+            } else {
+                Some(settings_path()?)
+            }
+            .as_deref(),
+        )
+    };
+    let repository = if cli.start {
+        match start()? {
+            Some(repository) => repository,
+            None => return Ok(()),
+        }
+    } else if let Some(destination) = cli.init {
+        Repository::initialize(&path, &destination, &cli.initial_branch)?
+    } else if let Some(source) = cli.clone {
+        Repository::clone_into(
+            &path,
+            &source,
+            cli.destination
+                .as_deref()
+                .expect("clap requires destination"),
+        )?
+    } else {
+        match Repository::open(&path) {
+            Ok(repository) => repository,
+            Err(error) => {
+                use std::io::IsTerminal;
+                let inspection = cli.list_workspaces
+                    || cli.list_stashes
+                    || cli.list_tags
+                    || cli.list_reflog
+                    || cli.list_prs
+                    || cli.list_github_repos
+                    || cli.pr.is_some()
+                    || cli.pr_files.is_some();
+                if !cli.resume
+                    && !explicit_repo
+                    && !cli.headless
+                    && !inspection
+                    && std::io::stdin().is_terminal()
+                    && std::io::stdout().is_terminal()
+                {
+                    match start()? {
+                        Some(repository) => repository,
+                        None => return Ok(()),
+                    }
+                } else {
+                    return Err(error);
+                }
+            }
+        }
+    };
     if cli.list_reflog {
         for entry in repository.reflog(100)? {
             println!(

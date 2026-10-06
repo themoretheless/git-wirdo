@@ -88,7 +88,9 @@ impl Ui {
         frame.render_widget(detail, body[1]);
 
         let actions = match app.view {
-            ViewMode::RecentRepositories => "enter open | D forget entry | O open path",
+            ViewMode::RecentRepositories => {
+                "enter open | N initialize | C clone Git | D forget entry | O open path"
+            }
             ViewMode::Hunks => {
                 "s stage unstaged hunk | u unstage staged hunk | d staged/unstaged | tab files"
             }

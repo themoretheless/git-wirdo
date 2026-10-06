@@ -15,6 +15,32 @@ cargo run --locked -- --repo /path/to/repo
 also accepted; commands operate relative to the repository root. Linked worktrees
 and repositories with no commits are supported. Bare repositories are not.
 
+Starting in a directory outside a checkout opens repository selection. `--start`
+opens that screen explicitly: `O` opens a local path, `N` initializes a repository
+with a chosen initial branch (default `main`), and `C` clones an arbitrary Git URL
+or local repository into a new or empty directory. Enter opens a saved recent
+root. Relative paths resolve from the startup directory. Operations run in the
+background; Esc cancels, and `q` cancels and waits for process cleanup before exit.
+Errors retain the selection screen and allow retrying or opening another path.
+
+The same operations are available after opening a checkout: press `I`, then `N`
+or `C`; relative paths resolve from that working tree's root. Initialization keeps
+ordinary files and refuses existing Git metadata, bare repositories, metadata
+subdirectories, files and destination symlinks. Clone refuses nonempty directories.
+The client never deletes a destination after a failed/cancelled operation; Git may
+clean up its own incomplete clone. Inspect the reported destination before retrying.
+Credentials use Git's configured mechanisms; Git password prompts are disabled.
+
+Explicit lifecycle commands also work outside a checkout:
+
+```bash
+git-wirdo --init ./new-project --initial-branch main --headless
+git-wirdo --clone https://example.org/team/project.git --destination ./project --headless
+```
+
+Omit `--headless` to open the resulting working tree in the UI. Explicit `--repo`
+errors and noninteractive inspection errors never enter raw terminal mode.
+
 For scripts, redirected output, or a quick status check without a terminal:
 
 ```bash
@@ -192,7 +218,8 @@ each other's repository entries. Changes to the same repository use the last
 writer's settings. Damaged, unsupported or unreadable state is preserved and
 disables saving for that session; save errors remain visible and can be retried.
 
-The current directory (or explicit `--repo`) always determines the checkout.
+The current directory (or explicit `--repo`) determines the checkout unless an
+explicit lifecycle operation or the selection screen chooses a different root.
 `--resume` explicitly opens the last saved root, including from outside a repo;
 it reports missing paths rather than selecting a different checkout.
 `--list-recent` lists saved roots without a TUI or Git mutations. Headless Git

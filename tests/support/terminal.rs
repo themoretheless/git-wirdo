@@ -29,6 +29,31 @@ impl TerminalFixture {
         Self::spawn_with(binary, root, |_| {})
     }
     pub fn spawn_with(binary: &Path, root: &Path, configure: impl FnOnce(&mut Command)) -> Self {
+        Self::spawn_starting(binary, Some(root), configure)
+    }
+    pub fn spawn_starting(
+        binary: &Path,
+        root: Option<&Path>,
+        configure: impl FnOnce(&mut Command),
+    ) -> Self {
+        Self::spawn_configured(binary, root, true, configure)
+    }
+    pub fn spawn_saved_starting(
+        binary: &Path,
+        state: &Path,
+        configure: impl FnOnce(&mut Command),
+    ) -> Self {
+        Self::spawn_configured(binary, None, false, |command| {
+            command.arg("--state-file").arg(state).arg("--start");
+            configure(command);
+        })
+    }
+    fn spawn_configured(
+        binary: &Path,
+        root: Option<&Path>,
+        no_state: bool,
+        configure: impl FnOnce(&mut Command),
+    ) -> Self {
         let config = TempDirectory::new();
         let fake = config.0.join("gh");
         std::fs::write(
@@ -74,10 +99,13 @@ impl TerminalFixture {
             0
         );
         let mut command = Command::new(binary);
+        if let Some(root) = root {
+            command.arg("--repo").arg(root);
+        }
+        if no_state {
+            command.arg("--no-state");
+        }
         command
-            .arg("--repo")
-            .arg(root)
-            .arg("--no-state")
             .env("TERM", "xterm-256color")
             .env("PATH", std::env::join_paths(paths).unwrap())
             .env("GH_CONFIG_DIR", &config.0)

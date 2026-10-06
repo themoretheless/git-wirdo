@@ -18,10 +18,10 @@ use git_wirdo::git::Repository;
 use git_wirdo::session::Session;
 use git_wirdo::ui::Ui;
 
-struct TerminalGuard;
+pub(crate) struct TerminalGuard;
 
 impl TerminalGuard {
-    fn enter() -> Result<Self> {
+    pub(crate) fn enter() -> Result<Self> {
         enable_raw_mode()?;
         // Construct the guard before the next fallible step so partial setup is also cleaned up.
         let guard = Self;
@@ -71,12 +71,7 @@ pub fn run(repository: Repository, state_path: Option<PathBuf>) -> Result<()> {
             }
         }
     }
-    let previous_hook = std::panic::take_hook();
-    std::panic::set_hook(Box::new(move |info| {
-        // Panic hooks run before unwinding, so restore before the diagnostic is printed.
-        restore_terminal();
-        previous_hook(info);
-    }));
+    install_panic_hook();
     let _guard = TerminalGuard::enter()?;
     let mut terminal = Terminal::new(CrosstermBackend::new(io::stdout()))?;
     let mut ui = Ui::default();
@@ -116,4 +111,13 @@ pub fn run(repository: Repository, state_path: Option<PathBuf>) -> Result<()> {
         eprintln!("UI settings: {error}");
     }
     Ok(())
+}
+
+pub(crate) fn install_panic_hook() {
+    let previous_hook = std::panic::take_hook();
+    std::panic::set_hook(Box::new(move |info| {
+        // Panic hooks run before unwinding, so restore before the diagnostic is printed.
+        restore_terminal();
+        previous_hook(info);
+    }));
 }

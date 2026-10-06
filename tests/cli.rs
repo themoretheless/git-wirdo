@@ -15,7 +15,17 @@ fn help_documents_repository_and_headless_options() {
     let text = String::from_utf8(output.stdout).unwrap();
     assert!(text.contains("--repo"));
     assert!(text.contains("--headless"));
-    for flag in ["--resume", "--list-recent", "--state-file", "--no-state"] {
+    for flag in [
+        "--resume",
+        "--list-recent",
+        "--state-file",
+        "--no-state",
+        "--init",
+        "--clone",
+        "--destination",
+        "--initial-branch",
+        "--start",
+    ] {
         assert!(text.contains(flag));
     }
 }

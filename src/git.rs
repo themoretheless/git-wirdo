@@ -88,6 +88,63 @@ pub enum ConflictSide {
 }
 
 impl Repository {
+    /// Create a working tree explicitly, without reinitializing existing Git metadata.
+    pub fn initialize(base: &Path, destination: &Path, branch: &str) -> Result<Self> {
+        git(base, ["check-ref-format", "--branch", branch])?;
+        let destination = lifecycle_destination(base, destination)?;
+        match fs::symlink_metadata(destination.join(".git")) {
+            Ok(_) => bail!("Destination already contains Git metadata"),
+            Err(error) if error.kind() == std::io::ErrorKind::NotFound => {}
+            Err(error) => return Err(error.into()),
+        }
+        git(
+            base,
+            [
+                OsStr::new("init"),
+                OsStr::new("--initial-branch"),
+                OsStr::new(branch),
+                OsStr::new("--"),
+                destination.as_os_str(),
+            ],
+        )
+        .with_context(|| {
+            format!(
+                "Initialization failed at {}; existing files retained",
+                display_path(&destination)
+            )
+        })?;
+        Self::open(&destination)
+    }
+
+    /// Clone any Git URL or local repository. Never remove a partial destination on failure.
+    pub fn clone_into(base: &Path, source: &OsStr, destination: &Path) -> Result<Self> {
+        ensure!(!source.is_empty(), "Clone source is required");
+        let destination = lifecycle_destination(base, destination)?;
+        if destination.exists() {
+            ensure!(
+                fs::read_dir(&destination)?.next().is_none(),
+                "Clone destination must be empty"
+            );
+        }
+        git(
+            base,
+            [
+                OsStr::new("clone"),
+                OsStr::new("--progress"),
+                OsStr::new("--"),
+                source,
+                destination.as_os_str(),
+            ],
+        )
+        .with_context(|| {
+            format!(
+                "Clone failed at {}; inspect any partial destination before retrying",
+                display_path(&destination)
+            )
+        })?;
+        Self::open(&destination)
+    }
+
     /// Resolve the working tree once, so all status paths and subsequent commands share a base.
     pub fn open(path: &Path) -> Result<Self> {
         let inside = git(path, ["rev-parse", "--is-inside-work-tree"])
@@ -1515,6 +1572,39 @@ fn parse_status(bytes: &[u8]) -> Result<Vec<FileEntry>> {
         });
     }
     Ok(files)
+}
+
+/// Validate before invoking Git: preserve files, reject symlinks and Git metadata targets.
+fn lifecycle_destination(base: &Path, path: &Path) -> Result<PathBuf> {
+    ensure!(!path.as_os_str().is_empty(), "Destination is required");
+    let destination = if path.is_absolute() {
+        path.to_owned()
+    } else {
+        fs::canonicalize(base)?.join(path)
+    };
+    match fs::symlink_metadata(&destination) {
+        Ok(metadata) => ensure!(
+            metadata.is_dir() && !metadata.file_type().is_symlink(),
+            "Destination must be a directory, not a file or symlink"
+        ),
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => {}
+        Err(error) => return Err(error.into()),
+    }
+    let ancestor = destination
+        .ancestors()
+        .find(|path| path.exists())
+        .context("Destination has no existing parent")?;
+    ensure!(ancestor.is_dir(), "Destination parent must be a directory");
+    let canonical = fs::canonicalize(ancestor)?;
+    // rev-parse works inside metadata and bare repositories too; opening a working tree doesn't.
+    if let Ok(output) = git(ancestor, ["rev-parse", "--absolute-git-dir"]) {
+        let metadata = fs::canonicalize(output_path(&output)?)?;
+        ensure!(
+            !canonical.starts_with(&metadata),
+            "Destination is inside existing Git metadata"
+        );
+    }
+    Ok(destination)
 }
 
 #[cfg(test)]

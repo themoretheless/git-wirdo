@@ -100,6 +100,8 @@ pub enum PromptKind {
     DeleteBranch(String),
     IntegrateBranch(String, bool),
     CloneRepository(String),
+    InitializeRepository,
+    CloneGitRepository,
     Workspace,
     OpenRepository,
     Remove(crate::model::Workspace),
@@ -917,6 +919,22 @@ impl App {
                 "Branch integrated".into()
             }
 
+            PromptKind::InitializeRepository => {
+                let repository = Repository::initialize(
+                    self.repository.root(),
+                    std::path::Path::new(&v[0]),
+                    &v[1],
+                )?;
+                return self.open_repository(repository.root());
+            }
+            PromptKind::CloneGitRepository => {
+                let repository = Repository::clone_into(
+                    self.repository.root(),
+                    std::ffi::OsStr::new(&v[0]),
+                    std::path::Path::new(&v[1]),
+                )?;
+                return self.open_repository(repository.root());
+            }
             PromptKind::CloneRepository(name) => {
                 let path = PathBuf::from(&v[0]);
                 let path = if path.is_absolute() {
@@ -1042,6 +1060,19 @@ impl App {
 
     fn apply(&mut self, action: Action) -> Result<()> {
         match action {
+            Action::New if self.view == ViewMode::RecentRepositories => self
+                .start_prefilled_prompt(
+                    PromptKind::InitializeRepository,
+                    vec!["New repository path", "Initial branch"],
+                    vec![String::new(), "main".into()],
+                ),
+            Action::CommentPr if self.view == ViewMode::RecentRepositories => self.start_prompt(
+                PromptKind::CloneGitRepository,
+                vec![
+                    "Git URL or local source path",
+                    "Clone destination (empty or new directory)",
+                ],
+            ),
             Action::RecentRepositories => {
                 self.capture_navigation();
                 self.view = ViewMode::RecentRepositories;

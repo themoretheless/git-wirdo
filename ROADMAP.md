@@ -52,6 +52,11 @@ Implemented foundations:
   Offline GitHub CLI acceptance covers PR forms, paginated diffs/comments,
   head/line guards, creation/checkout, repository listing and local clone.
 
+- Repository lifecycle: initialize while retaining ordinary files, clone arbitrary
+  Git URLs/local repositories, and choose/open/create/clone outside a checkout.
+  Recent-root operations and the startup screen are covered through a real Unix
+  terminal, including recoverable errors, cancellation and terminal restoration.
+
 Remaining acceptance work:
 
 - Complete native Windows runtime verification of background process-tree
@@ -59,10 +64,6 @@ Remaining acceptance work:
 
 - Stable CI checks and native platform-specific filename/terminal behavior
   remain regression requirements; Unix terminal acceptance is covered above.
-
-- Repository lifecycle: initialize a new repository, clone an arbitrary Git
-  URL/local repository, and start outside an existing checkout. Current entrypoints
-  open existing worktrees; cloning currently goes through the GitHub repository list.
 
 Known current limits are documented in README. Keep this list honest as features
 are implemented; do not mark an item complete based only on a method or key binding.
