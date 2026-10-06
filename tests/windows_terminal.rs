@@ -174,9 +174,9 @@ fn native_windows_terminal_stages_commits_creates_branch_and_restores_screen() {
     let mut terminal = Terminal::new(&repo);
     terminal.expect("literal [ü] file.txt");
     terminal.key(b"s", "Action: Staged");
-    assert!(
-        repo.git(&["diff", "--cached", "--name-only"])
-            .contains("literal [ü]")
+    assert_eq!(
+        repo.git(&["diff", "--cached", "--name-only", "-z"]),
+        "literal [ü] file.txt\0"
     );
     terminal.key(b"c", "Commit message:");
     terminal.field(

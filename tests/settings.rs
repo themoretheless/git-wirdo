@@ -57,12 +57,18 @@ fn recent_open_keeps_unsaved_files_and_settings_on_both_working_trees() {
     assert_eq!(app.navigation.repositories.len(), 2);
     app.recent_selection = 1;
     app.handle(Action::SwitchBranch);
-    assert_eq!(app.repository.root(), worktree.canonicalize().unwrap());
+    assert_eq!(
+        app.repository.root().canonicalize().unwrap(),
+        worktree.canonicalize().unwrap()
+    );
     assert_eq!(app.view, ViewMode::Branches);
     app.handle(Action::RecentRepositories);
     app.recent_selection = 1;
     app.handle(Action::SwitchBranch);
-    assert_eq!(app.repository.root(), repo.path.canonicalize().unwrap());
+    assert_eq!(
+        app.repository.root().canonicalize().unwrap(),
+        repo.path.canonicalize().unwrap()
+    );
     assert_eq!(app.view, ViewMode::History);
     assert!(app.graph_visible);
     assert_eq!(
@@ -84,7 +90,10 @@ fn missing_recent_path_does_not_replace_current_repo_and_forget_does_not_delete_
     let before = app.navigation.clone();
     app.handle(Action::SwitchBranch);
     assert!(app.message_is_error);
-    assert_eq!(app.repository.root(), current.path.canonicalize().unwrap());
+    assert_eq!(
+        app.repository.root().canonicalize().unwrap(),
+        current.path.canonicalize().unwrap()
+    );
     assert_eq!(app.navigation, before);
     app.handle(Action::Remove);
     app.capture_navigation();
