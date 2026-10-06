@@ -427,8 +427,8 @@ forcibly terminated while holding a Git lock can leave a lock file; investigate
 its owner before removing it. No lock is removed automatically.
 
 Repository validation and initial status loading occur before entering the TUI.
-CLI inspection options remain synchronous. Windows code is checked by cross
-compilation; native Windows cancellation still requires its CI/runtime checks.
+CLI inspection options remain synchronous. Native Windows cancellation and
+terminal workflows are exercised by the hosted Windows acceptance tests below.
 
 ## Terminal acceptance checks
 
@@ -455,5 +455,14 @@ Linux-only non-UTF8 filesystem case. Linux PTY setup uses the platform's actual
 On Windows, `cargo test --locked --test windows_process` exercises forced Job
 Object cancellation and normal parent exit with a descendant holding inherited
 pipes. The cancellation test opens a native process handle before stopping the
-job and checks that it becomes signalled. These fixtures cross-compile, but have
-not yet been executed on a Windows host; the CI/runtime gate remains open.
+job and checks that it becomes signalled. `windows_terminal` drives the real binary
+through native ConPTY and verifies Unicode literal staging, commits, branches,
+resize, local clone, worktree navigation, hook cancellation and alternate-screen
+restoration against independent Git state.
+
+[Hosted acceptance run](https://github.com/themoretheless/git-wirdo/actions/runs/37524510965)
+passed formatting, strict all-target Clippy and all tests on Linux (183), macOS
+(182), and Windows (154), including both native Windows suites. The counts differ
+because Unix PTY and filesystem fixtures are platform-specific; Windows uses
+ConPTY instead. The current macOS code also passed the full 182-test suite, build,
+formatting and strict Clippy on Rust 1.101.0-nightly (282215592 2026-10-04).

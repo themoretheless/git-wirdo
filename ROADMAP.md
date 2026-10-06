@@ -62,15 +62,31 @@ Implemented foundations:
   lifecycle cancellation and non-UTF8 filesystem paths. macOS terminal workflows
   passed again after fixing the platform-specific PTY argument type.
 
-Remaining acceptance work:
+Verified acceptance:
 
-- Complete native Windows runtime verification of background process-tree
-  cancellation and cleanup after parent exit. Native process-handle fixtures are
-  prepared and cross-compile; cross compilation alone does not prove behavior.
+- [Hosted platform matrix](https://github.com/themoretheless/git-wirdo/actions/runs/37524510965)
+  passed formatting, strict all-target Clippy and all tests: Linux 183, macOS 182,
+  Windows 154. Native Windows Job Object fixtures verify cancellation and cleanup
+  after normal parent exit with inherited pipes. Native ConPTY fixtures verify
+  Unicode literal staging, commit/branch controls, resize, clone/worktree navigation,
+  Git-hook cancellation and alternate-screen restoration.
+- Rust nightly 1.101.0 (282215592 2026-10-04) passed formatting, strict Clippy,
+  build and all 182 macOS tests.
 
-- Successful hosted CI checks for the platform matrix remain a regression gate;
-  current Unix runtime evidence is local macOS and Linux execution. Native Windows
-  filename/terminal behavior remains unverified.
+Acceptance evidence by capability:
 
-Known current limits are documented in README. Keep this list honest as features
-are implemented; do not mark an item complete based only on a method or key binding.
+| Capability | Independent repository/transport checks | Terminal workflow checks |
+| --- | --- | --- |
+| Status, literal paths, staging, commits and branches | `git_workflows`, `app_behavior`, `branch_actions` | `terminal_workflows`, `windows_terminal` |
+| Hunks and guarded file restoration | `hunks`, `restore` | `terminal_workflows` |
+| Merge/rebase/cherry-pick/revert and conflict recovery | `git_workflows`, `branch_actions`, `history_actions` | `terminal_workflows` |
+| Remotes, upstream, pull strategies and tags | `remotes`, `tags`, `review` | `terminal_workflows` |
+| Stashes with index/untracked restoration | `stashes` | `terminal_workflows` |
+| History, graph, reset backups and reflog recovery | `history_actions`, `reset_reflog` | `terminal_workflows` |
+| Worktrees, open/init/clone and recent-root settings | `workspaces`, `lifecycle`, `settings`, `cli` | `terminal_lifecycle`, `terminal_background`, `windows_terminal` |
+| GitHub repository/PR lifecycle, editing and inline review | GitHub transport/patch tests and strict offline CLI fixture | `terminal_github` |
+| Background serialization, cancellation and process cleanup | `background`, `windows_process` | `terminal_background`, `terminal_lifecycle`, `windows_terminal` |
+
+Known current limits remain documented in README. GitHub mutations are verified
+with an offline CLI fixture, not live review/comment publication. This is a Git
+client; Delta's agent threads, models and cloud collaboration are not implemented.
