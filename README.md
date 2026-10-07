@@ -91,6 +91,40 @@ the branch being rebased **onto**, and “theirs” means the commit being repla
 `K` discards the current rebase step; `x` aborts the operation. These are explicit
 Git actions, not undo commands.
 
+## Command palette and importing patches
+
+Press `:` to open the command palette. Type words to filter command names
+(case-insensitive), use ↑/↓ to select, Enter to execute, and Escape to cancel.
+The list includes common commands, commands for the current view and direct view
+navigation. Shortcut letters typed in the palette are query text. Commands reuse
+the existing actions and confirmation forms; the palette does not bypass clean
+checkout, stale-selection, head, literal-path or read-only inspection guards.
+Git/network commands still use the serialized cancellable worker.
+
+Press `@`, or choose **Import mail patch**, to import a file produced by
+`git format-patch` (a mail patch or mbox series). Enter its path, then type `apply`.
+The checkout must be clean with no unfinished Git operation. Relative paths
+resolve from the repository root. The input file is preserved. Import runs
+`git am --3way --no-rerere-autoupdate`: it creates commits with the mail's author
+and message, runs the normal Git hooks and can stop on conflicts or invalid mail.
+
+Failed imports remain recoverable in Conflicts: resolve/edit and stage the files,
+then `e` continues the mail import; `x` aborts it and restores the pre-import HEAD,
+including when earlier messages in a series already applied. `o/t` choose a side,
+`a` stages a manual resolution. `K` stays specific to rebase. Import state is
+identified separately from both rebase backends. When there is no index conflict,
+refresh shows the current mail patch for manual recovery. Cancellation can leave
+an unfinished import; inspect it and continue or abort explicitly.
+
+```bash
+git-wirdo --repo /path/to/repo --import-patch /path/to/incoming.patch
+```
+
+CLI import is an explicit mutation and needs no TUI confirmation. Failures report
+Git diagnostics and preserve the unfinished operation for recovery in the TUI.
+This imports mail patches as commits; arbitrary plain diff files are not accepted
+as a replacement for mail metadata.
+
 ## Reliability and behavior
 
 - Status uses NUL-delimited porcelain output, not human-formatted Git output.

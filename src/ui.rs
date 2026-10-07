@@ -2,7 +2,7 @@ use ratatui::Frame;
 use ratatui::layout::{Constraint, Direction, Layout};
 use ratatui::style::{Color, Style};
 use ratatui::text::{Line, Span};
-use ratatui::widgets::{Block, Borders, List, ListItem, ListState, Paragraph, Wrap};
+use ratatui::widgets::{Block, Borders, Clear, List, ListItem, ListState, Paragraph, Wrap};
 
 use crate::app::App;
 use crate::model::{ViewMode, display_path};
@@ -124,7 +124,7 @@ impl Ui {
             Style::default()
         };
         let footer = Paragraph::new(vec![
-            Line::from(if let Some(prompt) = &app.prompt { format!("{}: {}_ (Enter next, Esc cancel)", prompt.labels[prompt.values.len()], safe_text(&prompt.text).replace('\n', "↵")) } else if app.searching { format!("Find: {}_ (Enter search, Esc cancel)", safe_text(&app.search)) } else { "tab view | I recent | j/k select | PgUp/PgDn diff | / find | n next | d base | v seen | r refresh | q quit".into() }),
+            Line::from(if let Some(prompt) = &app.prompt { format!("{}: {}_ (Enter next, Esc cancel)", prompt.labels[prompt.values.len()], safe_text(&prompt.text).replace('\n', "↵")) } else if app.searching { format!("Find: {}_ (Enter search, Esc cancel)", safe_text(&app.search)) } else { " : commands | tab view | I recent | j/k select | PgUp/PgDn diff | / find | n next | d base | v seen | r refresh | q quit".into() }),
             Line::from(actions),
             Line::from(Span::styled(
                 format!("Action: {}{}", safe_text(&app.message).replace('\n', " | "), app.persistence_error.as_ref().map(|e| format!(" | Settings: {}", safe_text(e).replace('\n', " | "))).unwrap_or_default()),
@@ -133,6 +133,37 @@ impl Ui {
         ])
         .block(Block::default().borders(Borders::ALL).title("Help"));
         frame.render_widget(footer, layout[2]);
+        if let Some(prompt) = &app.prompt
+            && matches!(prompt.kind, crate::app::PromptKind::CommandPalette)
+        {
+            let area = frame.area();
+            let panel = ratatui::layout::Rect::new(
+                area.x + 2,
+                area.y + 2,
+                area.width.saturating_sub(4),
+                area.height.saturating_sub(4),
+            );
+            frame.render_widget(Clear, panel);
+            let entries = crate::commands::filtered(app.view, &prompt.text);
+            let items: Vec<ListItem> = if entries.is_empty() {
+                vec![ListItem::new("No matching commands")]
+            } else {
+                entries
+                    .iter()
+                    .map(|entry| ListItem::new(entry.title))
+                    .collect()
+            };
+            let list = List::new(items)
+                .block(Block::default().borders(Borders::ALL).title(format!(
+                    "Commands: {}_ | ↑/↓ select, Enter execute, Esc cancel",
+                    safe_text(&prompt.text)
+                )))
+                .highlight_style(Style::default().fg(Color::Yellow))
+                .highlight_symbol("> ");
+            let mut selection = ListState::default()
+                .with_selected((!entries.is_empty()).then_some(app.palette_selection));
+            frame.render_stateful_widget(list, panel, &mut selection);
+        }
     }
 }
 

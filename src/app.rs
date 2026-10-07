@@ -10,6 +10,8 @@ use crate::model::{RepoState, ViewMode, display_path};
 /// UI-independent commands; terminal key bindings live in `input`.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Action {
+    CommandPalette,
+    ImportPatch,
     BrowseTracked,
     ExportCommit,
     FileHistory,
@@ -75,6 +77,8 @@ pub enum Action {
 
 #[derive(Debug, Clone)]
 pub enum PromptKind {
+    CommandPalette,
+    ImportPatch,
     ExportCommit(String),
     FilterPr,
     EditPr(crate::github::EditablePr),
@@ -166,6 +170,7 @@ pub struct App {
     pub pr_files: Vec<crate::pr_review::PrFile>,
     pub pr_file_selection: usize,
     pub prompt: Option<Prompt>,
+    pub palette_selection: usize,
     pub github_repositories: Vec<crate::github::GitHubRepo>,
     pub github_repo_selection: usize,
     pub stashes: Vec<crate::model::StashEntry>,
@@ -248,6 +253,7 @@ impl App {
             pr_files: Vec::new(),
             pr_file_selection: 0,
             prompt: None,
+            palette_selection: 0,
             github_repositories: Vec::new(),
             github_repo_selection: 0,
             stashes: Vec::new(),
@@ -357,7 +363,7 @@ impl App {
                     .min(self.state.commits.len().saturating_sub(1));
             }
             ViewMode::Hunks => {
-                self.hunks = if self.upstream_comparison {
+                self.hunks = if self.browse_tracked || self.upstream_comparison {
                     Vec::new()
                 } else if let Some(file) = self.state.files.get(self.file_selection) {
                     self.repository.hunks(file, self.staged_hunks)?
@@ -582,7 +588,8 @@ impl App {
                         self.repository.conflict_detail(path)?
                     )),
                     None => Ok(format!(
-                        "{header}\n\nNo conflicted file selected.\n\n{help}"
+                        "{header}\n\nNo conflicted file selected.\n\n{help}\n\n{}",
+                        if self.state.merge_state.am_in_progress { self.repository.current_mail_patch()? } else { String::new() }
                     )),
                 }
             }
@@ -621,6 +628,7 @@ impl App {
     }
 
     pub fn handle_paste(&mut self, text: &str) {
+        self.palette_selection = 0;
         let target = if let Some(prompt) = &mut self.prompt {
             Some(&mut prompt.text)
         } else if self.searching {
@@ -641,6 +649,29 @@ impl App {
     pub fn handle_key(&mut self, key: KeyEvent) {
         if key.kind != KeyEventKind::Press {
             return;
+        }
+        if self
+            .prompt
+            .as_ref()
+            .is_some_and(|p| matches!(p.kind, PromptKind::CommandPalette))
+        {
+            let count =
+                crate::commands::filtered(self.view, &self.prompt.as_ref().unwrap().text).len();
+            match key.code {
+                KeyCode::Up => {
+                    self.palette_selection = self.palette_selection.saturating_sub(1);
+                    return;
+                }
+                KeyCode::Down => {
+                    self.palette_selection = self
+                        .palette_selection
+                        .saturating_add(1)
+                        .min(count.saturating_sub(1));
+                    return;
+                }
+                KeyCode::Char(_) | KeyCode::Backspace => self.palette_selection = 0,
+                _ => {}
+            }
         }
         if self.prompt.is_some() {
             if key.modifiers == KeyModifiers::CONTROL && key.code == KeyCode::Char('c') {
@@ -761,6 +792,31 @@ impl App {
         use anyhow::ensure;
         let v = prompt.values;
         let output = match prompt.kind {
+            PromptKind::CommandPalette => {
+                let entries = crate::commands::filtered(self.view, &v[0]);
+                let entry = entries
+                    .get(self.palette_selection)
+                    .context("No matching command; open the palette and change the search")?;
+                if let Some(view) = entry.view {
+                    self.view = view;
+                }
+                return self.apply(entry.action);
+            }
+            PromptKind::ImportPatch => {
+                ensure!(v[1] == "apply", "Import cancelled: type apply exactly");
+                let result = self
+                    .repository
+                    .import_mail_patch(std::path::Path::new(&v[0]));
+                let refreshed = self.refresh();
+                if self.state.merge_state.am_in_progress {
+                    self.view = ViewMode::Conflicts;
+                    self.refresh_detail();
+                }
+                result?;
+                refreshed?;
+                "Imported mail patch".into()
+            }
+
             PromptKind::ExportCommit(sha) => {
                 let path = self
                     .repository
@@ -1135,6 +1191,14 @@ impl App {
             return Ok(());
         }
         match action {
+            Action::CommandPalette => {
+                self.palette_selection = 0;
+                self.start_prompt(PromptKind::CommandPalette, vec!["Command search"]);
+            }
+            Action::ImportPatch => self.start_prompt(
+                PromptKind::ImportPatch,
+                vec!["Mail patch file", "Type apply to import commits"],
+            ),
             Action::New if self.view == ViewMode::RecentRepositories => self
                 .start_prefilled_prompt(
                     PromptKind::InitializeRepository,

@@ -54,6 +54,9 @@ struct Cli {
     /// List tracked paths from the index (including clean files).
     #[arg(long, group = "inspection")]
     list_files: bool,
+    /// Import a mail patch/mbox as commits into a clean checkout.
+    #[arg(long, value_name = "PATH", group = "inspection")]
+    import_patch: Option<PathBuf>,
     /// Export one non-merge commit as a mail patch without overwriting a file.
     #[arg(
         long,
@@ -171,6 +174,7 @@ fn main() -> Result<()> {
             Err(error) => {
                 use std::io::IsTerminal;
                 let inspection = cli.list_files
+                    || cli.import_patch.is_some()
                     || cli.export_patch.is_some()
                     || cli.file_history.is_some()
                     || cli.blame.is_some()
@@ -199,6 +203,11 @@ fn main() -> Result<()> {
             }
         }
     };
+    if let Some(path) = cli.import_patch {
+        repository.import_mail_patch(&path)?;
+        println!("Imported mail patch");
+        return Ok(());
+    }
     if cli.list_files {
         for file in repository.tracked_files()? {
             println!("{}", display_path(&file.path));

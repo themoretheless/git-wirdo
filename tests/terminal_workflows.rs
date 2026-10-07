@@ -642,3 +642,88 @@ fn clean_file_browser_and_commit_export_are_available_through_the_terminal() {
     );
     terminal.quit();
 }
+
+#[test]
+fn palette_search_navigation_and_confirmed_mail_import_use_existing_terminal_forms() {
+    let source = TestRepo::new();
+    source.write("import [a] ü.txt", "incoming content\n");
+    source.commit_all("incoming mail root");
+    let target = TestRepo::new();
+    let path = source.directory.0.join("palette mail ü.patch");
+    source.open().export_commit("HEAD", &path).unwrap();
+    let mut terminal = tui(&target);
+    terminal.expect("Ready");
+    terminal.key(b":", "Commands:");
+    terminal.send(b"\x1b[200~view commit history\x1b[201~");
+    terminal.expect("View commit history");
+    terminal.key(b"\r", "View: History");
+    terminal.key(b":", "Commands:");
+    terminal.send(b"\x1b[200~import mail\x1b[201~");
+    terminal.expect("Import mail patch");
+    terminal.key(b"\r", "Mail patch file:");
+    terminal.field(path.to_str().unwrap(), "Type apply to import commits");
+    terminal.field("apply", "Imported mail patch");
+    assert_eq!(
+        std::fs::read_to_string(target.path.join("import [a] ü.txt")).unwrap(),
+        "incoming content\n"
+    );
+    assert_eq!(
+        target.git(&["log", "-1", "--format=%s"]).trim(),
+        "incoming mail root"
+    );
+    terminal.key(b":", "Commands:");
+    terminal.send(b"qPcs");
+    terminal.expect("No matching commands");
+    terminal.key(b"\x1b", "View: History");
+    assert!(target.git(&["status", "--porcelain"]).is_empty());
+    terminal.quit();
+}
+
+#[test]
+fn mail_import_conflicts_can_be_resolved_or_aborted_through_terminal_controls() {
+    for abort in [true, false] {
+        let source = TestRepo::new();
+        source.write("file", "base\n");
+        source.commit_all("base");
+        source.write("file", "incoming\n");
+        source.commit_all("incoming mail change");
+        let target = TestRepo::new();
+        target.write("file", "base\n");
+        target.commit_all("base");
+        target.write("file", "local\n");
+        target.commit_all("local");
+        let before = target.git(&["rev-parse", "HEAD"]);
+        let path = source.directory.0.join("conflict.patch");
+        source.open().export_commit("HEAD", &path).unwrap();
+        let mut terminal = tui(&target);
+        terminal.expect("Ready");
+        terminal.key(b"@", "Mail patch file:");
+        terminal.field(path.to_str().unwrap(), "Type apply to import commits");
+        terminal.field("apply", "View: Conflicts");
+        terminal.key(b"r", "Mail patch import in progress");
+        if abort {
+            terminal.key(b"x", "Aborted Git operation");
+            assert_eq!(target.git(&["rev-parse", "HEAD"]), before);
+        } else {
+            terminal.key(b"t", "Resolved file with Theirs");
+            terminal.key(b"e", "Continued Git operation");
+            assert_eq!(
+                target.git(&["log", "-1", "--format=%s"]).trim(),
+                "incoming mail change"
+            );
+            assert_eq!(
+                std::fs::read_to_string(target.path.join("file")).unwrap(),
+                "incoming\n"
+            );
+        }
+        assert!(
+            !target
+                .open()
+                .load_state()
+                .unwrap()
+                .merge_state
+                .in_progress()
+        );
+        terminal.quit();
+    }
+}

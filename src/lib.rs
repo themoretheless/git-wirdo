@@ -1,4 +1,5 @@
 pub mod app;
+pub mod commands;
 pub mod git;
 pub mod github;
 pub mod input;

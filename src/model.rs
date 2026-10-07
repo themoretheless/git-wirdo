@@ -50,6 +50,7 @@ pub struct CommitEntry {
 pub struct MergeState {
     pub merge_in_progress: bool,
     pub rebase_in_progress: bool,
+    pub am_in_progress: bool,
     pub cherry_pick_in_progress: bool,
     pub revert_in_progress: bool,
     pub conflicts: Vec<PathBuf>,
@@ -59,12 +60,15 @@ impl MergeState {
     pub fn in_progress(&self) -> bool {
         self.merge_in_progress
             || self.rebase_in_progress
+            || self.am_in_progress
             || self.cherry_pick_in_progress
             || self.revert_in_progress
     }
 
     pub fn summary(&self) -> String {
-        let operation = if self.rebase_in_progress {
+        let operation = if self.am_in_progress {
+            "Mail patch import in progress"
+        } else if self.rebase_in_progress {
             "Rebase in progress"
         } else if self.cherry_pick_in_progress {
             "Cherry-pick in progress"

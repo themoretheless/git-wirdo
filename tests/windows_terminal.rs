@@ -342,3 +342,79 @@ fn native_windows_browses_clean_files_and_exports_a_patch_usable_by_git_am() {
     );
     terminal.quit();
 }
+
+#[test]
+fn native_windows_palette_selects_and_imports_mail_through_confirmed_forms() {
+    let source = TestRepo::new();
+    source.write("import [a] ü.txt", "incoming content\n");
+    source.commit_all("incoming native mail");
+    let target = TestRepo::new();
+    let path = source.directory.0.join("native mail ü.patch");
+    source.open().export_commit("HEAD", &path).unwrap();
+    let mut terminal = Terminal::new(&target);
+    terminal.expect("Ready");
+    terminal.key(b":", "Commands:");
+    terminal.field("view commit history", "View: History");
+    terminal.key(b":", "Commands:");
+    terminal.field("import mail", "Mail patch file:");
+    terminal.field(path.to_str().unwrap(), "Type apply to import commits");
+    terminal.field("apply", "Imported mail patch");
+    assert_eq!(
+        std::fs::read_to_string(target.path.join("import [a] ü.txt")).unwrap(),
+        "incoming content\n"
+    );
+    assert_eq!(
+        target.git(&["log", "-1", "--format=%s"]).trim(),
+        "incoming native mail"
+    );
+    terminal.quit();
+}
+
+#[test]
+fn native_windows_mail_conflict_recovery_continues_and_aborts_the_correct_operation() {
+    for abort in [true, false] {
+        let source = TestRepo::new();
+        source.write("file", "base\n");
+        source.commit_all("base");
+        source.write("file", "incoming\n");
+        source.commit_all("incoming native change");
+        let target = TestRepo::new();
+        target.write("file", "base\n");
+        target.commit_all("base");
+        target.write("file", "local\n");
+        target.commit_all("local");
+        let before = target.git(&["rev-parse", "HEAD"]);
+        let path = source.directory.0.join("native conflict.patch");
+        source.open().export_commit("HEAD", &path).unwrap();
+        let mut terminal = Terminal::new(&target);
+        terminal.expect("Ready");
+        terminal.key(b"@", "Mail patch file:");
+        terminal.field(path.to_str().unwrap(), "Type apply to import commits");
+        terminal.field("apply", "View: Conflicts");
+        terminal.key(b"r", "Mail patch import in progress");
+        if abort {
+            terminal.key(b"x", "Aborted Git operation");
+            assert_eq!(target.git(&["rev-parse", "HEAD"]), before);
+        } else {
+            terminal.key(b"t", "Resolved file with Theirs");
+            terminal.key(b"e", "Continued Git operation");
+            assert_eq!(
+                target.git(&["log", "-1", "--format=%s"]).trim(),
+                "incoming native change"
+            );
+            assert_eq!(
+                std::fs::read_to_string(target.path.join("file")).unwrap(),
+                "incoming\n"
+            );
+        }
+        assert!(
+            !target
+                .open()
+                .load_state()
+                .unwrap()
+                .merge_state
+                .in_progress()
+        );
+        terminal.quit();
+    }
+}

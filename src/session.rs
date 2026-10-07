@@ -124,6 +124,15 @@ impl Session {
                 action_for_key(key).unwrap_or(Action::Search)
             )
         };
+        if key.code == KeyCode::Enter
+            && self
+                .app
+                .prompt
+                .as_ref()
+                .is_some_and(|p| matches!(p.kind, crate::app::PromptKind::CommandPalette))
+        {
+            self.app.prompt = None;
+        }
         let worker = thread::spawn(move || {
             controlled(task_control.clone(), generation, || updated.handle_key(key));
             if task_control.generation() != generation && !task_closing.load(Ordering::SeqCst) {
@@ -175,7 +184,9 @@ impl Session {
         matches!(
             action_for_key(key),
             Some(
-                Action::ExportCommit
+                Action::CommandPalette
+                    | Action::ImportPatch
+                    | Action::ExportCommit
                     | Action::Commit
                     | Action::AmendCommit
                     | Action::Branch

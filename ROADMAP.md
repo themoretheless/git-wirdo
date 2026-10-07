@@ -125,3 +125,17 @@ Expanded acceptance evidence:
 | File history and HEAD authorship | `file_inspection`: rename following, origin commits, commit limits, clean/deleted paths, staged rename, literal names and CLI validation | `file_history_and_blame_are_read_only_and_return_to_working_diff`; `native_windows_file_history_and_blame_keep_pending_work_and_index_unchanged` |
 | Clean tracked-file browsing | `extended_client`: contents, original rename path and preserved index/working files; CLI listing | `clean_file_browser_and_commit_export_are_available_through_the_terminal`; `native_windows_browses_clean_files_and_exports_a_patch_usable_by_git_am` |
 | Portable commit export | `extended_client`: independent root/rename/binary patch application, commit messages, preserved source state, overwrite and merge refusal | Both browser/export terminal scenarios apply the actual saved patch through `git am` |
+
+## Command palette and mail import
+
+- Added `:` searchable command palette with contextual actions, direct view
+  navigation, arrow selection and existing guarded confirmation forms.
+- Added `@` / `--import-patch` mail/mbox import through `git am --3way`, preserving
+  source authorship and messages. Import failure is distinguished from rebase;
+  conflict resolution, continue and abort use the native mail operation. Abort
+  restores the pre-import HEAD even after a partly applied series.
+- Repository/CLI tests cover dirty refusal, manual resolution, series abort,
+  authorship, rebase-apply classification, palette modal input and tracked-browser
+  hunk safety. Unix PTY and Windows ConPTY scenarios cover palette-to-form import
+  and both conflict recovery paths. Hosted platform verification remains pending
+  this change's own CI run.

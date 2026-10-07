@@ -682,7 +682,9 @@ impl Repository {
         Ok(MergeState {
             merge_in_progress: self.git_dir.join("MERGE_HEAD").try_exists()?,
             rebase_in_progress: self.git_dir.join("rebase-merge").try_exists()?
-                || self.git_dir.join("rebase-apply").try_exists()?,
+                || (self.git_dir.join("rebase-apply").try_exists()?
+                    && !self.git_dir.join("rebase-apply/applying").try_exists()?),
+            am_in_progress: self.git_dir.join("rebase-apply/applying").try_exists()?,
             cherry_pick_in_progress: self.git_dir.join("CHERRY_PICK_HEAD").try_exists()?,
             revert_in_progress: self.git_dir.join("REVERT_HEAD").try_exists()?,
             conflicts: files
@@ -939,6 +941,37 @@ impl Repository {
             text.push_str("\n[Preview truncated at 256 KiB]");
         }
         Ok(format!("[UNTRACKED]\n{text}"))
+    }
+
+    pub fn import_mail_patch(&self, path: &Path) -> Result<()> {
+        self.ensure_clean()?;
+        ensure!(!path.as_os_str().is_empty(), "Select a mail patch file");
+        let path = if path.is_absolute() {
+            path.to_owned()
+        } else {
+            self.root.join(path)
+        };
+        ensure!(
+            fs::metadata(&path)
+                .with_context(|| format!("Cannot read patch {}", display_path(&path)))?
+                .is_file(),
+            "Patch input must be a regular file"
+        );
+        git(
+            &self.root,
+            [
+                OsStr::new("am"),
+                OsStr::new("--3way"),
+                OsStr::new("--no-rerere-autoupdate"),
+                OsStr::new("--"),
+                path.as_os_str(),
+            ],
+        )?;
+        Ok(())
+    }
+
+    pub fn current_mail_patch(&self) -> Result<String> {
+        self.text(&["am", "--show-current-patch"])
     }
 
     pub fn tracked_files(&self) -> Result<Vec<FileEntry>> {
@@ -1476,7 +1509,9 @@ impl Repository {
             state.conflicts.is_empty(),
             "Resolve and stage all conflicts before continuing"
         );
-        if state.rebase_in_progress {
+        if state.am_in_progress {
+            git(&self.root, ["am", "--continue"])?;
+        } else if state.rebase_in_progress {
             git(&self.root, ["rebase", "--continue"])?;
         } else if state.cherry_pick_in_progress {
             git(&self.root, ["cherry-pick", "--continue"])?;
@@ -1501,7 +1536,9 @@ impl Repository {
 
     pub fn abort_operation(&self) -> Result<()> {
         let state = self.merge_state(&[])?;
-        if state.rebase_in_progress {
+        if state.am_in_progress {
+            git(&self.root, ["am", "--abort"])?;
+        } else if state.rebase_in_progress {
             git(&self.root, ["rebase", "--abort"])?;
         } else if state.cherry_pick_in_progress {
             git(&self.root, ["cherry-pick", "--abort"])?;
