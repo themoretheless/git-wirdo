@@ -540,10 +540,11 @@ through native ConPTY and verifies Unicode literal staging, commits, branches,
 resize, local clone, worktree navigation, hook cancellation and alternate-screen
 restoration against independent Git state.
 
-[Hosted acceptance run](https://github.com/themoretheless/git-wirdo/actions/runs/37620351731)
-passed formatting, strict all-target Clippy and all tests on Linux (192), macOS
-(191), and Windows (163), including both native Windows suites and the new file
-inspection/browser/export scenarios. The counts differ
+[Hosted acceptance run](https://github.com/themoretheless/git-wirdo/actions/runs/37630893643)
+passed formatting, strict all-target Clippy and all tests on Linux (200), macOS
+(199), and Windows (171), including native file inspection/browser/export, command
+palette and mail import/conflict recovery scenarios. The counts differ
 because Unix PTY and filesystem fixtures are platform-specific; Windows uses
-ConPTY instead. The current macOS code also passed the full 191-test suite, build,
-formatting and strict Clippy on Rust 1.101.0-nightly (282215592 2026-10-04).
+ConPTY instead. The browser/export version also passed its full 191-test suite and build
+on Rust 1.101.0-nightly (282215592 2026-10-04). Nightly formatting, strict Clippy,
+and the new palette/mail repository and terminal scenarios also passed.

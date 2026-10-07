@@ -137,5 +137,9 @@ Expanded acceptance evidence:
 - Repository/CLI tests cover dirty refusal, manual resolution, series abort,
   authorship, rebase-apply classification, palette modal input and tracked-browser
   hunk safety. Unix PTY and Windows ConPTY scenarios cover palette-to-form import
-  and both conflict recovery paths. Hosted platform verification remains pending
-  this change's own CI run.
+  and both conflict recovery paths.
+- [Palette/mail import acceptance](https://github.com/themoretheless/git-wirdo/actions/runs/37630893643)
+  passed formatting, strict all-target Clippy and every test on Linux (200), macOS
+  (199), and Windows (171). Native Windows scenarios confirmed both palette form
+  routing and continue/abort of mail conflicts. Repository tests also verified
+  abort of a partly applied series and preservation of apply-backend rebase.
