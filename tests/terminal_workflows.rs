@@ -589,3 +589,30 @@ fn remote_tracking_checkout_is_created_through_the_terminal() {
     );
     terminal.quit();
 }
+
+#[test]
+fn file_history_and_blame_are_read_only_and_return_to_working_diff() {
+    let repo = TestRepo::new();
+    repo.write("old [a] ü.txt", "original line\n");
+    repo.commit_all("file original creation");
+    repo.git(&["mv", "old [a] ü.txt", "new [a] ü.txt"]);
+    repo.commit_all("file rename");
+    repo.write("new [a] ü.txt", "pending edit\n");
+    let mut terminal = tui(&repo);
+    terminal.expect("pending edit");
+    terminal.key(b"h", "File history at HEAD");
+    terminal.key(b"/", "Find: ");
+    terminal.field(
+        "file original creation",
+        "Action: Find: file original creation",
+    );
+    terminal.expect("file original creation");
+    terminal.key(b"s", "File inspection is read-only");
+    assert!(repo.git(&["diff", "--cached"]).is_empty());
+    terminal.key(b"Q", "Line authorship at HEAD");
+    terminal.expect("original line");
+    terminal.key(b"Q", "pending edit");
+    terminal.key(b"s", "Action: Staged");
+    assert_eq!(repo.git(&["show", ":new [a] ü.txt"]), "pending edit\n");
+    terminal.quit();
+}

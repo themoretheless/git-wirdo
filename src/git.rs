@@ -941,6 +941,47 @@ impl Repository {
         Ok(format!("[UNTRACKED]\n{text}"))
     }
 
+    /// Committed history only; Git follows the selected literal path across renames.
+    pub fn file_history(&self, path: &Path, limit: usize) -> Result<String> {
+        validate_inspection_path(path)?;
+        ensure!(
+            (1..=10_000).contains(&limit),
+            "File history limit must be 1..=10000"
+        );
+        self.path_text(
+            &[
+                "log",
+                "--follow",
+                "--no-color",
+                "--no-show-signature",
+                "--no-ext-diff",
+                "--no-textconv",
+                "--format=fuller",
+                "--patch",
+                "--stat",
+                &format!("--max-count={limit}"),
+                "HEAD",
+            ],
+            &[path],
+        )
+    }
+
+    /// Inspect HEAD, leaving pending edits and the index untouched.
+    pub fn file_blame(&self, path: &Path) -> Result<String> {
+        validate_inspection_path(path)?;
+        self.path_text(
+            &[
+                "blame",
+                "--no-textconv",
+                "--root",
+                "--date=short",
+                "--abbrev=12",
+                "HEAD",
+            ],
+            &[path],
+        )
+    }
+
     pub fn commit_detail(&self, commit: &CommitEntry) -> Result<String> {
         self.text(&[
             "show",
@@ -1421,6 +1462,18 @@ impl Repository {
     fn path_text(&self, args: &[&str], paths: &[&Path]) -> Result<String> {
         Ok(String::from_utf8_lossy(&self.run_paths(args, paths)?).into_owned())
     }
+}
+
+fn validate_inspection_path(path: &Path) -> Result<()> {
+    ensure!(
+        !path.as_os_str().is_empty()
+            && path.components().all(|part| matches!(
+                part,
+                std::path::Component::Normal(_) | std::path::Component::CurDir
+            )),
+        "File path must be relative to the repository root, without parent traversal"
+    );
+    Ok(())
 }
 
 fn git_command<I, S>(path: &Path, args: I) -> Command

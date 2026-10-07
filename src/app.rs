@@ -10,6 +10,8 @@ use crate::model::{RepoState, ViewMode, display_path};
 /// UI-independent commands; terminal key bindings live in `input`.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Action {
+    FileHistory,
+    FileBlame,
     RecentRepositories,
     ResetCommit,
     ToggleGraph,
@@ -138,6 +140,7 @@ pub struct App {
     pub reflog_limit: usize,
     pub branch_selection: usize,
     pub conflict_selection: usize,
+    pub file_detail: FileDetail,
     pub detail_text: String,
     pub message: String,
     pub message_is_error: bool,
@@ -172,6 +175,14 @@ pub struct App {
     pub hunks: Vec<crate::patch::Hunk>,
     pub hunk_selection: usize,
     pub staged_hunks: bool,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub enum FileDetail {
+    #[default]
+    Diff,
+    History,
+    Blame,
 }
 
 impl App {
@@ -209,6 +220,7 @@ impl App {
             reflog_limit: 100,
             branch_selection: 0,
             conflict_selection: 0,
+            file_detail: FileDetail::Diff,
             detail_text: String::new(),
             message: "Ready".to_owned(),
             message_is_error: false,
@@ -514,6 +526,15 @@ impl App {
                 None => Ok("No open pull requests. N creates a draft PR; authenticate with gh auth login outside the TUI.".into()),
             },
             ViewMode::Files => match self.displayed_files().get(self.file_selection) {
+                Some(file) if self.file_detail != FileDetail::Diff => {
+                    let path = file.original_path.as_deref().unwrap_or(&file.path);
+                    let (label, text) = if self.file_detail == FileDetail::History {
+                        ("File history at HEAD (up to 100 commits; follows renames)", self.repository.file_history(path, 100)?)
+                    } else {
+                        ("Line authorship at HEAD (pending edits excluded)", self.repository.file_blame(path)?)
+                    };
+                    Ok(format!("{label}: {}\n\n{text}", display_path(path)))
+                }
                 Some(file) if self.upstream_comparison => self.repository.upstream_detail(file),
                 Some(file) => self.repository.file_detail(file),
                 None => Ok("No files selected".to_owned()),
@@ -1059,6 +1080,20 @@ impl App {
     }
 
     fn apply(&mut self, action: Action) -> Result<()> {
+        if self.view == ViewMode::Files
+            && self.file_detail != FileDetail::Diff
+            && matches!(
+                action,
+                Action::Stage
+                    | Action::Unstage
+                    | Action::Remove
+                    | Action::RestoreFromIndex
+                    | Action::ToggleSeen
+            )
+        {
+            self.message = "File inspection is read-only; toggle h/Q back to the diff first".into();
+            return Ok(());
+        }
         match action {
             Action::New if self.view == ViewMode::RecentRepositories => self
                 .start_prefilled_prompt(
@@ -1184,6 +1219,19 @@ impl App {
                         ],
                     );
                 }
+            }
+            Action::FileHistory | Action::FileBlame if self.view == ViewMode::Files => {
+                let mode = if action == Action::FileHistory {
+                    FileDetail::History
+                } else {
+                    FileDetail::Blame
+                };
+                self.file_detail = if self.file_detail == mode {
+                    FileDetail::Diff
+                } else {
+                    mode
+                };
+                self.refresh_detail();
             }
             Action::ToggleGraph if self.view == ViewMode::History => {
                 self.graph_visible = !self.graph_visible;
@@ -1523,6 +1571,7 @@ impl App {
                 if !self.upstream_comparison {
                     self.review_files = self.repository.upstream_files()?;
                 }
+                self.file_detail = FileDetail::Diff;
                 self.upstream_comparison = !self.upstream_comparison;
                 self.file_selection = 0;
                 self.refresh_detail();

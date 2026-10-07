@@ -90,3 +90,22 @@ Acceptance evidence by capability:
 Known current limits remain documented in README. GitHub mutations are verified
 with an offline CLI fixture, not live review/comment publication. This is a Git
 client; Delta's agent threads, models and cloud collaboration are not implemented.
+
+## Beyond the initial acceptance plan
+
+- Added literal per-file history with patches and rename following, and committed
+  HEAD line authorship. Available in the Files detail pane and through CLI for
+  clean/deleted historical paths. Inspection preserves the index and working copy;
+  mutation/review shortcuts require returning to diff.
+- New repository and CLI tests independently check origin commit attribution,
+  rename history, commit limits, literal paths, pending work and mode conflicts.
+  Real Unix and Windows terminal scenarios exercise inspection and return to diff.
+- Cross-platform verification for this extension remains pending until its own
+  hosted CI run succeeds; earlier acceptance numbers above describe the base client.
+
+Next extensions for the expanded client goal:
+
+- Browse tracked files without requiring local modifications, and inspect their
+  contents/history/authorship through the TUI.
+- Export committed changes as portable mail patches with explicit destination and
+  overwrite protection, validated by applying the result in an independent clone.

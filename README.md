@@ -186,6 +186,28 @@ contents remain identical; edits or removed files clear their marks. Marks are
 independent between working and upstream comparisons and are not saved to disk.
 Search is case-sensitive: loaded commit metadata in History, selected details in other views. While entering a query, ordinary shortcut letters are text.
 
+## File history and line authorship
+
+In Files, `h` toggles committed history for the selected literal file, including
+patches and rename-following (up to 100 commits). `Q` toggles line authorship at
+HEAD. Press the same key again to return to the working/upstream diff; `d` also
+returns to diff when switching comparisons. Scroll and search work in both modes.
+Staging, unstaging, discard and Seen shortcuts are disabled during file inspection.
+Pending rename inspection uses the original HEAD path. Changes in the working
+copy/index are excluded; new uncommitted files have no HEAD authorship.
+
+CLI inspection also accepts clean or deleted historical files, relative to the
+repository root. Paths are literal, including brackets and Unicode; absolute paths
+and parent traversal are rejected. `--file-limit` accepts 1..=10000 commits.
+
+```bash
+git-wirdo --repo /path/to/repo --file-history 'src/file.rs' --file-limit 200
+git-wirdo --repo /path/to/repo --blame 'src/file.rs'
+```
+
+These commands are read-only and use the same cancellable process runner in the
+TUI. Blame describes committed HEAD contents, not pending edits.
+
 ## Workspaces and GitHub
 
 Tab cycles Files → History → Branches → Conflicts → Workspaces → PullRequests →

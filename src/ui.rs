@@ -101,7 +101,7 @@ impl Ui {
             ViewMode::RemoteBranches => "enter track | f fetch | U upstream | W publish",
             ViewMode::Stashes => "S save | y apply | T pop | D drop | r refresh",
             ViewMode::Files => {
-                "s stage | u unstage | i hunks | w restore index | D discard HEAD | c commit | b branch | f fetch | p pull | P push"
+                "h history | Q blame | s stage | u unstage | i hunks | w restore index | D discard HEAD | c commit | b branch | f fetch | p pull | P push"
             }
             ViewMode::History => "g graph/patch | + older | Y cherry-pick | Z revert | F reset",
             ViewMode::Reflog => "+ older entries | N recover into new branch",

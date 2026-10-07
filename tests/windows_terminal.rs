@@ -293,3 +293,27 @@ fn native_windows_terminal_cancels_a_git_hook_and_keeps_staged_work() {
     assert_eq!(repo.git(&["show", ":file"]), "staged");
     terminal.quit();
 }
+
+#[test]
+fn native_windows_file_history_and_blame_keep_pending_work_and_index_unchanged() {
+    let repo = TestRepo::new();
+    repo.write("old [a] ü.txt", "original line\n");
+    repo.commit_all("original creation");
+    repo.git(&["mv", "old [a] ü.txt", "new [a] ü.txt"]);
+    repo.commit_all("rename only");
+    repo.write("new [a] ü.txt", "pending edit\n");
+    let mut terminal = Terminal::new(&repo);
+    terminal.expect("pending edit");
+    terminal.key(b"h", "File history at HEAD");
+    terminal.expect("rename only");
+    terminal.key(b"s", "File inspection is read-only");
+    assert!(repo.git(&["diff", "--cached"]).is_empty());
+    terminal.key(b"Q", "Line authorship at HEAD");
+    terminal.expect("original line");
+    terminal.key(b"Q", "pending edit");
+    assert_eq!(
+        std::fs::read_to_string(repo.path.join("new [a] ü.txt")).unwrap(),
+        "pending edit\n"
+    );
+    terminal.quit();
+}

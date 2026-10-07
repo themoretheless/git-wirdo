@@ -51,6 +51,15 @@ struct Cli {
     /// List saved stashes without starting the TUI.
     #[arg(long, group = "inspection")]
     list_stashes: bool,
+    /// Show committed history for a literal path, following renames.
+    #[arg(long, value_name = "PATH", group = "inspection")]
+    file_history: Option<PathBuf>,
+    /// Show line authorship at HEAD for a literal path (pending edits excluded).
+    #[arg(long, value_name = "PATH", group = "inspection")]
+    blame: Option<PathBuf>,
+    /// Maximum file-history commits (1..=10000).
+    #[arg(long, default_value = "100", requires = "file_history", value_parser = clap::value_parser!(u32).range(1..=10000))]
+    file_limit: u32,
     /// List local tags without starting the TUI.
     #[arg(long, group = "inspection")]
     list_tags: bool,
@@ -147,7 +156,9 @@ fn main() -> Result<()> {
             Ok(repository) => repository,
             Err(error) => {
                 use std::io::IsTerminal;
-                let inspection = cli.list_workspaces
+                let inspection = cli.file_history.is_some()
+                    || cli.blame.is_some()
+                    || cli.list_workspaces
                     || cli.list_stashes
                     || cli.list_tags
                     || cli.list_reflog
@@ -172,6 +183,17 @@ fn main() -> Result<()> {
             }
         }
     };
+    if let Some(path) = cli.file_history {
+        print!(
+            "{}",
+            repository.file_history(&path, cli.file_limit as usize)?
+        );
+        return Ok(());
+    }
+    if let Some(path) = cli.blame {
+        print!("{}", repository.file_blame(&path)?);
+        return Ok(());
+    }
     if cli.list_reflog {
         for entry in repository.reflog(100)? {
             println!(
