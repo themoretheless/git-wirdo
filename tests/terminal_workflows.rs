@@ -616,3 +616,29 @@ fn file_history_and_blame_are_read_only_and_return_to_working_diff() {
     assert_eq!(repo.git(&["show", ":new [a] ü.txt"]), "pending edit\n");
     terminal.quit();
 }
+
+#[test]
+fn clean_file_browser_and_commit_export_are_available_through_the_terminal() {
+    let repo = TestRepo::new();
+    repo.write("clean [a] ü.txt", "committed content\n");
+    repo.commit_all("exported terminal root");
+    let mut terminal = tui(&repo);
+    terminal.expect("Ready");
+    terminal.key(b"J", "Browsing tracked files");
+    terminal.expect("committed content");
+    terminal.key(b"h", "File history at HEAD");
+    terminal.key(b"Q", "Line authorship at HEAD");
+    terminal.expect("committed content");
+    terminal.key(b"J", "Action: Working changes");
+    terminal.view("History");
+    terminal.key(b"!", "New mail patch destination");
+    let path = repo.directory.0.join("terminal patch ü.patch");
+    terminal.field(path.to_str().unwrap(), "Exported mail patch");
+    let target = TestRepo::new();
+    target.git(&["am", path.to_str().unwrap()]);
+    assert_eq!(
+        std::fs::read_to_string(target.path.join("clean [a] ü.txt")).unwrap(),
+        "committed content\n"
+    );
+    terminal.quit();
+}

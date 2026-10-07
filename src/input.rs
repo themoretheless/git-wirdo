@@ -17,6 +17,8 @@ pub fn action_for_key(key: KeyEvent) -> Option<Action> {
         return None;
     }
     Some(match key.code {
+        KeyCode::Char('J') => Action::BrowseTracked,
+        KeyCode::Char('!') => Action::ExportCommit,
         KeyCode::Char('h') => Action::FileHistory,
         KeyCode::Char('Q') => Action::FileBlame,
         KeyCode::Char('I') => Action::RecentRepositories,
@@ -73,6 +75,7 @@ pub fn action_for_key(key: KeyEvent) -> Option<Action> {
         KeyCode::Char('o') => Action::TakeOurs,
         KeyCode::Char('t') => Action::TakeTheirs,
         KeyCode::Char('a') => Action::MarkResolved,
+
         KeyCode::Char('e') => Action::Continue,
         KeyCode::Char('K') => Action::SkipRebase,
         KeyCode::Char('x') => Action::Abort,

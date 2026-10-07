@@ -175,7 +175,8 @@ impl Session {
         matches!(
             action_for_key(key),
             Some(
-                Action::Commit
+                Action::ExportCommit
+                    | Action::Commit
                     | Action::AmendCommit
                     | Action::Branch
                     | Action::New

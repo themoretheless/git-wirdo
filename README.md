@@ -188,6 +188,11 @@ Search is case-sensitive: loaded commit metadata in History, selected details in
 
 ## File history and line authorship
 
+In Files, `J` toggles a read-only browser of all index-tracked files, including clean
+files. The content preview shows the working copy, with bounded text reads and
+symlink/binary placeholders. `J` returns to working changes; staging and discard
+require that return. `--list-files` lists the tracked paths without opening a TUI.
+
 In Files, `h` toggles committed history for the selected literal file, including
 patches and rename-following (up to 100 commits). `Q` toggles line authorship at
 HEAD. Press the same key again to return to the working/upstream diff; `d` also
@@ -207,6 +212,25 @@ git-wirdo --repo /path/to/repo --blame 'src/file.rs'
 
 These commands are read-only and use the same cancellable process runner in the
 TUI. Blame describes committed HEAD contents, not pending edits.
+
+## Portable commit patches
+
+In History, `!` exports the selected immutable commit. Enter a new destination;
+existing files (including symlinks) are refused. Relative destinations resolve
+from the repository root. The patch includes commit metadata/message, renames and
+binary changes and can be applied in another checkout using `git am`.
+
+```bash
+git-wirdo --repo /path/to/repo --export-patch HEAD --output /path/to/new.patch
+```
+
+Export leaves refs, the index and working files untouched apart from creating the
+explicit destination. Root commits are supported. Merge commits are refused
+because their changes cannot be represented as a single ordinary mail patch.
+A write failure reports the partial output for inspection; no existing file is
+replaced or automatically removed. Git operation cancellation remains available
+while generating the patch; writing the completed output is a synchronous local
+file write. Exports do not send email or publish anything remotely.
 
 ## Workspaces and GitHub
 

@@ -51,6 +51,20 @@ struct Cli {
     /// List saved stashes without starting the TUI.
     #[arg(long, group = "inspection")]
     list_stashes: bool,
+    /// List tracked paths from the index (including clean files).
+    #[arg(long, group = "inspection")]
+    list_files: bool,
+    /// Export one non-merge commit as a mail patch without overwriting a file.
+    #[arg(
+        long,
+        value_name = "REVISION",
+        group = "inspection",
+        requires = "output"
+    )]
+    export_patch: Option<String>,
+    /// New file destination for --export-patch.
+    #[arg(long, value_name = "PATH", requires = "export_patch")]
+    output: Option<PathBuf>,
     /// Show committed history for a literal path, following renames.
     #[arg(long, value_name = "PATH", group = "inspection")]
     file_history: Option<PathBuf>,
@@ -156,7 +170,9 @@ fn main() -> Result<()> {
             Ok(repository) => repository,
             Err(error) => {
                 use std::io::IsTerminal;
-                let inspection = cli.file_history.is_some()
+                let inspection = cli.list_files
+                    || cli.export_patch.is_some()
+                    || cli.file_history.is_some()
                     || cli.blame.is_some()
                     || cli.list_workspaces
                     || cli.list_stashes
@@ -183,6 +199,20 @@ fn main() -> Result<()> {
             }
         }
     };
+    if cli.list_files {
+        for file in repository.tracked_files()? {
+            println!("{}", display_path(&file.path));
+        }
+        return Ok(());
+    }
+    if let Some(revision) = cli.export_patch {
+        let path = repository.export_commit(
+            &revision,
+            cli.output.as_deref().context("Missing patch destination")?,
+        )?;
+        println!("Exported mail patch {}", display_path(&path));
+        return Ok(());
+    }
     if let Some(path) = cli.file_history {
         print!(
             "{}",

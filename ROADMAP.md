@@ -103,9 +103,15 @@ client; Delta's agent threads, models and cloud collaboration are not implemente
 - Cross-platform verification for this extension remains pending until its own
   hosted CI run succeeds; earlier acceptance numbers above describe the base client.
 
-Next extensions for the expanded client goal:
-
-- Browse tracked files without requiring local modifications, and inspect their
-  contents/history/authorship through the TUI.
-- Export committed changes as portable mail patches with explicit destination and
-  overwrite protection, validated by applying the result in an independent clone.
+- Added the read-only tracked-file browser (`J`) and CLI listing, including clean
+  paths, working-copy previews, history and authorship. Pending renames retain
+  their original HEAD inspection path, and editing requires returning to changes.
+- Added immutable commit export (`!` in History and `--export-patch --output`),
+  preserving metadata/message, rename and binary patches. Root commits work;
+  merge commits and existing destinations are refused. Independent `git am`
+  round trips verify resulting contents and commit messages while retaining the
+  source's pending changes and index. Unix and native Windows terminals cover
+  browser-to-history/blame navigation, form submission and patch application.
+- Hosted matrix verification of these additional extensions is pending their own
+  CI run. [File history/authorship extension CI](https://github.com/themoretheless/git-wirdo/actions/runs/37619527745)
+  passed all three platforms before the browser/export additions.

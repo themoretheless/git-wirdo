@@ -941,6 +941,96 @@ impl Repository {
         Ok(format!("[UNTRACKED]\n{text}"))
     }
 
+    pub fn tracked_files(&self) -> Result<Vec<FileEntry>> {
+        let bytes = git(&self.root, ["ls-files", "--cached", "-z"])?;
+        let mut paths = bytes
+            .split(|b| *b == 0)
+            .filter(|p| !p.is_empty())
+            .map(path_from_bytes)
+            .collect::<Result<Vec<_>>>()?;
+        paths.sort();
+        paths.dedup();
+        Ok(paths
+            .into_iter()
+            .map(|path| FileEntry {
+                path,
+                original_path: None,
+                status: "tracked".into(),
+                staged: false,
+                unstaged: false,
+                conflicted: false,
+            })
+            .collect())
+    }
+
+    pub fn file_contents(&self, path: &Path) -> Result<String> {
+        validate_inspection_path(path)?;
+        self.untracked_preview(path)
+            .map(|text| text.replacen("[UNTRACKED", "[WORKING FILE", 1))
+    }
+
+    /// A self-contained mail patch for one non-merge commit; never overwrite a file.
+    pub fn export_commit(&self, revision: &str, destination: &Path) -> Result<PathBuf> {
+        ensure!(!revision.is_empty(), "Select a commit to export");
+        let target = format!("{revision}^{{commit}}");
+        let sha = self.text(&["rev-parse", "--verify", "--end-of-options", &target])?;
+        let sha = sha.trim();
+        let parents = self.text(&["rev-list", "--parents", "--max-count=1", sha])?;
+        ensure!(
+            parents.split_whitespace().count() <= 2,
+            "Merge commits cannot be exported as a single mail patch; select an ordinary commit"
+        );
+        let bytes = git(
+            &self.root,
+            [
+                "format-patch",
+                "--stdout",
+                "--root",
+                "--no-signature",
+                "--no-numbered",
+                "--no-cover-letter",
+                "--no-notes",
+                "--no-ext-diff",
+                "--no-textconv",
+                "--binary",
+                "--full-index",
+                "-1",
+                sha,
+                "--",
+            ],
+        )?;
+        ensure!(!bytes.is_empty(), "Git did not produce a mail patch");
+        ensure!(
+            !destination.as_os_str().is_empty(),
+            "Enter a patch destination"
+        );
+        let path = if destination.is_absolute() {
+            destination.to_owned()
+        } else {
+            self.root.join(destination)
+        };
+        use std::io::Write;
+        let mut file = fs::OpenOptions::new()
+            .write(true)
+            .create_new(true)
+            .open(&path)
+            .with_context(|| {
+                format!(
+                    "Cannot create patch {}; existing files are never overwritten",
+                    display_path(&path)
+                )
+            })?;
+        file.write_all(&bytes)
+            .and_then(|()| file.sync_all())
+            .with_context(|| {
+                format!(
+                    "Cannot finish patch {}; inspect the partial file",
+                    display_path(&path)
+                )
+            })?;
+        Ok(path)
+    }
+
     /// Committed history only; Git follows the selected literal path across renames.
     pub fn file_history(&self, path: &Path, limit: usize) -> Result<String> {
         validate_inspection_path(path)?;

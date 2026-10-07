@@ -10,6 +10,8 @@ use crate::model::{RepoState, ViewMode, display_path};
 /// UI-independent commands; terminal key bindings live in `input`.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Action {
+    BrowseTracked,
+    ExportCommit,
     FileHistory,
     FileBlame,
     RecentRepositories,
@@ -73,6 +75,7 @@ pub enum Action {
 
 #[derive(Debug, Clone)]
 pub enum PromptKind {
+    ExportCommit(String),
     FilterPr,
     EditPr(crate::github::EditablePr),
     ReadyPr(crate::github::PullRequest),
@@ -140,6 +143,8 @@ pub struct App {
     pub reflog_limit: usize,
     pub branch_selection: usize,
     pub conflict_selection: usize,
+    pub browse_tracked: bool,
+    pub tracked_files: Vec<FileEntry>,
     pub file_detail: FileDetail,
     pub detail_text: String,
     pub message: String,
@@ -220,6 +225,8 @@ impl App {
             reflog_limit: 100,
             branch_selection: 0,
             conflict_selection: 0,
+            browse_tracked: false,
+            tracked_files: Vec::new(),
             file_detail: FileDetail::Diff,
             detail_text: String::new(),
             message: "Ready".to_owned(),
@@ -312,6 +319,9 @@ impl App {
             }
         }
         self.seen = valid;
+        if self.browse_tracked {
+            self.tracked_files = self.load_tracked_files()?;
+        }
         self.file_selection = self
             .file_selection
             .min(self.displayed_files().len().saturating_sub(1));
@@ -535,6 +545,7 @@ impl App {
                     };
                     Ok(format!("{label}: {}\n\n{text}", display_path(path)))
                 }
+                Some(file) if self.browse_tracked => self.repository.file_contents(&file.path),
                 Some(file) if self.upstream_comparison => self.repository.upstream_detail(file),
                 Some(file) => self.repository.file_detail(file),
                 None => Ok("No files selected".to_owned()),
@@ -578,8 +589,26 @@ impl App {
         }
     }
 
+    fn load_tracked_files(&self) -> Result<Vec<FileEntry>> {
+        Ok(self
+            .repository
+            .tracked_files()?
+            .into_iter()
+            .map(|file| {
+                self.state
+                    .files
+                    .iter()
+                    .find(|changed| changed.path == file.path)
+                    .cloned()
+                    .unwrap_or(file)
+            })
+            .collect())
+    }
+
     pub fn displayed_files(&self) -> &[FileEntry] {
-        if self.upstream_comparison {
+        if self.browse_tracked {
+            &self.tracked_files
+        } else if self.upstream_comparison {
             &self.review_files
         } else {
             &self.state.files
@@ -732,6 +761,13 @@ impl App {
         use anyhow::ensure;
         let v = prompt.values;
         let output = match prompt.kind {
+            PromptKind::ExportCommit(sha) => {
+                let path = self
+                    .repository
+                    .export_commit(&sha, std::path::Path::new(&v[0]))?;
+                format!("Exported mail patch {}", display_path(&path))
+            }
+
             PromptKind::FilterPr => {
                 let filter = crate::github::PrFilter {
                     state: v[0].trim().into(),
@@ -1080,8 +1116,12 @@ impl App {
     }
 
     fn apply(&mut self, action: Action) -> Result<()> {
+        if self.view == ViewMode::Files && self.browse_tracked && action == Action::OpenHunks {
+            self.message = "Return to working changes before selecting editable hunks".into();
+            return Ok(());
+        }
         if self.view == ViewMode::Files
-            && self.file_detail != FileDetail::Diff
+            && (self.browse_tracked || self.file_detail != FileDetail::Diff)
             && matches!(
                 action,
                 Action::Stage
@@ -1091,7 +1131,7 @@ impl App {
                     | Action::ToggleSeen
             )
         {
-            self.message = "File inspection is read-only; toggle h/Q back to the diff first".into();
+            self.message = "File inspection is read-only; return to working changes first".into();
             return Ok(());
         }
         match action {
@@ -1217,6 +1257,32 @@ impl App {
                             "Displayed old/new line number",
                             "Inline comment body",
                         ],
+                    );
+                }
+            }
+            Action::BrowseTracked if self.view == ViewMode::Files => {
+                self.browse_tracked = !self.browse_tracked;
+                self.upstream_comparison = false;
+                self.file_detail = FileDetail::Diff;
+                self.file_selection = 0;
+                self.tracked_files = if self.browse_tracked {
+                    self.load_tracked_files()?
+                } else {
+                    Vec::new()
+                };
+                self.refresh_detail();
+                self.message = if self.browse_tracked {
+                    "Browsing tracked files (read-only)"
+                } else {
+                    "Working changes"
+                }
+                .into();
+            }
+            Action::ExportCommit if self.view == ViewMode::History => {
+                if let Some(commit) = self.state.commits.get(self.history_selection) {
+                    self.start_prompt(
+                        PromptKind::ExportCommit(commit.sha.clone()),
+                        vec!["New mail patch destination (existing files refused)"],
                     );
                 }
             }
@@ -1571,6 +1637,7 @@ impl App {
                 if !self.upstream_comparison {
                     self.review_files = self.repository.upstream_files()?;
                 }
+                self.browse_tracked = false;
                 self.file_detail = FileDetail::Diff;
                 self.upstream_comparison = !self.upstream_comparison;
                 self.file_selection = 0;

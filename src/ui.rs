@@ -71,7 +71,9 @@ impl Ui {
             let files = app.displayed_files();
             format!(
                 "{} | Seen {}/{}",
-                if app.upstream_comparison {
+                if app.browse_tracked {
+                    "Tracked files (read-only)"
+                } else if app.upstream_comparison {
                     "Upstream"
                 } else {
                     "Working changes"
@@ -101,9 +103,11 @@ impl Ui {
             ViewMode::RemoteBranches => "enter track | f fetch | U upstream | W publish",
             ViewMode::Stashes => "S save | y apply | T pop | D drop | r refresh",
             ViewMode::Files => {
-                "h history | Q blame | s stage | u unstage | i hunks | w restore index | D discard HEAD | c commit | b branch | f fetch | p pull | P push"
+                "J tracked/changes | h history | Q blame | s stage | u unstage | i hunks | w restore index | D discard HEAD | c commit | b branch | f fetch | p pull | P push"
             }
-            ViewMode::History => "g graph/patch | + older | Y cherry-pick | Z revert | F reset",
+            ViewMode::History => {
+                "! export patch | g graph/patch | + older | Y cherry-pick | Z revert | F reset"
+            }
             ViewMode::Reflog => "+ older entries | N recover into new branch",
             ViewMode::Branches => "enter switch | b new | B rename | D delete | m merge | z rebase",
             ViewMode::GitHubRepositories => "enter clone | G auth status | O open local repository",

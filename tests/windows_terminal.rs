@@ -317,3 +317,28 @@ fn native_windows_file_history_and_blame_keep_pending_work_and_index_unchanged()
     );
     terminal.quit();
 }
+
+#[test]
+fn native_windows_browses_clean_files_and_exports_a_patch_usable_by_git_am() {
+    let repo = TestRepo::new();
+    repo.write("clean [a] ü.txt", "committed content\n");
+    repo.commit_all("exported native root");
+    let mut terminal = Terminal::new(&repo);
+    terminal.expect("Ready");
+    terminal.key(b"J", "Browsing tracked files");
+    terminal.expect("committed content");
+    terminal.key(b"h", "File history at HEAD");
+    terminal.key(b"Q", "Line authorship at HEAD");
+    terminal.key(b"J", "Action: Working changes");
+    terminal.key(b"\t", "View: History");
+    terminal.key(b"!", "New mail patch destination");
+    let path = repo.directory.0.join("native patch ü.patch");
+    terminal.field(path.to_str().unwrap(), "Exported mail patch");
+    let target = TestRepo::new();
+    target.git(&["am", path.to_str().unwrap()]);
+    assert_eq!(
+        std::fs::read_to_string(target.path.join("clean [a] ü.txt")).unwrap(),
+        "committed content\n"
+    );
+    terminal.quit();
+}
