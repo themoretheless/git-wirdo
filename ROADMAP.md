@@ -100,8 +100,8 @@ client; Delta's agent threads, models and cloud collaboration are not implemente
 - New repository and CLI tests independently check origin commit attribution,
   rename history, commit limits, literal paths, pending work and mode conflicts.
   Real Unix and Windows terminal scenarios exercise inspection and return to diff.
-- Cross-platform verification for this extension remains pending until its own
-  hosted CI run succeeds; earlier acceptance numbers above describe the base client.
+- History/authorship verification passed on all three hosted platforms; earlier
+  acceptance numbers above describe the base client before these additions.
 
 - Added the read-only tracked-file browser (`J`) and CLI listing, including clean
   paths, working-copy previews, history and authorship. Pending renames retain
@@ -112,6 +112,16 @@ client; Delta's agent threads, models and cloud collaboration are not implemente
   round trips verify resulting contents and commit messages while retaining the
   source's pending changes and index. Unix and native Windows terminals cover
   browser-to-history/blame navigation, form submission and patch application.
-- Hosted matrix verification of these additional extensions is pending their own
-  CI run. [File history/authorship extension CI](https://github.com/themoretheless/git-wirdo/actions/runs/37619527745)
-  passed all three platforms before the browser/export additions.
+- [Expanded client acceptance](https://github.com/themoretheless/git-wirdo/actions/runs/37620351731)
+  passed formatting, strict all-target Clippy and all tests on Linux (192), macOS
+  (191), and Windows (163). Native ConPTY tests exercise both extensions and apply
+  the exported patch with Git. The full 191-test macOS suite and strict Clippy
+  also passed on nightly; all added repository/CLI and terminal scenarios passed.
+
+Expanded acceptance evidence:
+
+| Added capability | Independent evidence | Real terminal evidence |
+| --- | --- | --- |
+| File history and HEAD authorship | `file_inspection`: rename following, origin commits, commit limits, clean/deleted paths, staged rename, literal names and CLI validation | `file_history_and_blame_are_read_only_and_return_to_working_diff`; `native_windows_file_history_and_blame_keep_pending_work_and_index_unchanged` |
+| Clean tracked-file browsing | `extended_client`: contents, original rename path and preserved index/working files; CLI listing | `clean_file_browser_and_commit_export_are_available_through_the_terminal`; `native_windows_browses_clean_files_and_exports_a_patch_usable_by_git_am` |
+| Portable commit export | `extended_client`: independent root/rename/binary patch application, commit messages, preserved source state, overwrite and merge refusal | Both browser/export terminal scenarios apply the actual saved patch through `git am` |
