@@ -4,7 +4,7 @@ use std::sync::Arc;
 use std::thread::JoinHandle;
 use std::time::{Duration, Instant};
 
-use anyhow::{Result, ensure};
+use anyhow::Result;
 use crossterm::event::{self, Event, KeyCode, KeyEventKind, KeyModifiers};
 use git_wirdo::{
     git::Repository,
@@ -79,11 +79,7 @@ fn launch_task(run: impl FnOnce() -> Result<Repository> + Send + 'static) -> Wor
 }
 
 pub fn run(base: PathBuf, state_path: Option<&Path>) -> Result<Option<Repository>> {
-    use std::io::IsTerminal;
-    ensure!(
-        std::io::stdin().is_terminal() && std::io::stdout().is_terminal(),
-        "Interactive mode requires a terminal; use --headless for scripts"
-    );
+    super::terminal::require_tty()?;
     let (recent, mut message) = match state_path.map(git_wirdo::settings::load).transpose() {
         Ok(navigation) => (
             navigation.map(|n| n.repositories).unwrap_or_default(),

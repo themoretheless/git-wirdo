@@ -74,6 +74,49 @@ pub enum Action {
     Abort,
 }
 
+impl Action {
+    /// Actions that only change UI state (open a prompt, scroll the detail pane) run on
+    /// the terminal thread; everything that touches Git or GitHub runs in the worker.
+    pub fn runs_locally(self, view: ViewMode) -> bool {
+        match self {
+            Self::Quit
+            | Self::CommandPalette
+            | Self::ImportPatch
+            | Self::ExportCommit
+            | Self::Commit
+            | Self::AmendCommit
+            | Self::Branch
+            | Self::New
+            | Self::Search
+            | Self::OpenRepository
+            | Self::SaveStash
+            | Self::SetUpstream
+            | Self::PublishBranch
+            | Self::PullStrategy
+            | Self::RenameBranch
+            | Self::MergeBranch
+            | Self::RebaseBranch
+            | Self::MergePr
+            | Self::ApprovePr
+            | Self::RequestChanges
+            | Self::CommentPr
+            | Self::ApplyStash
+            | Self::PopStash
+            | Self::EditPushUrl
+            | Self::DeleteRemoteTag
+            | Self::PageDown
+            | Self::PageUp
+            | Self::ScrollLeft
+            | Self::ScrollRight => true,
+            // Editing a pull request fetches its current text before the prompt opens.
+            Self::EditRemote => view != ViewMode::PullRequests,
+            // Discarding a file snapshots it before asking for confirmation.
+            Self::Remove => view != ViewMode::Files,
+            _ => false,
+        }
+    }
+}
+
 impl App {
     /// Git failures are recoverable UI messages, not reasons to leave the terminal in raw mode.
     pub fn handle(&mut self, action: Action) {
@@ -748,5 +791,23 @@ impl App {
             _ => {}
         }
         Ok(())
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn only_prompt_and_scroll_actions_stay_on_the_terminal_thread() {
+        assert!(Action::Commit.runs_locally(ViewMode::Files));
+        assert!(Action::PageDown.runs_locally(ViewMode::History));
+        assert!(!Action::SwitchBranch.runs_locally(ViewMode::Branches));
+        assert!(!Action::Refresh.runs_locally(ViewMode::Files));
+        // These two fetch repository state before their prompt opens.
+        assert!(Action::EditRemote.runs_locally(ViewMode::Remotes));
+        assert!(!Action::EditRemote.runs_locally(ViewMode::PullRequests));
+        assert!(Action::Remove.runs_locally(ViewMode::Branches));
+        assert!(!Action::Remove.runs_locally(ViewMode::Files));
     }
 }
