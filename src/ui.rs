@@ -9,7 +9,7 @@ use crate::model::{ViewMode, display_path};
 
 #[derive(Default)]
 pub struct Ui {
-    lists: [ListState; 15],
+    lists: [ListState; ViewMode::ALL.len()],
 }
 
 impl Ui {

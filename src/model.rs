@@ -103,44 +103,34 @@ pub enum ViewMode {
 }
 
 impl ViewMode {
+    /// Every view in Tab order; list rendering and cycling derive from this single list.
+    pub const ALL: [Self; 15] = [
+        Self::Files,
+        Self::History,
+        Self::Branches,
+        Self::Conflicts,
+        Self::Workspaces,
+        Self::PullRequests,
+        Self::GitHubRepositories,
+        Self::Stashes,
+        Self::Remotes,
+        Self::RemoteBranches,
+        Self::Tags,
+        Self::Hunks,
+        Self::Reflog,
+        Self::PrFiles,
+        Self::RecentRepositories,
+    ];
+
     pub fn index(self) -> usize {
-        match self {
-            Self::Files => 0,
-            Self::History => 1,
-            Self::Branches => 2,
-            Self::Conflicts => 3,
-            Self::Workspaces => 4,
-            Self::PullRequests => 5,
-            Self::GitHubRepositories => 6,
-            Self::Stashes => 7,
-            Self::Remotes => 8,
-            Self::RemoteBranches => 9,
-            Self::Tags => 10,
-            Self::Hunks => 11,
-            Self::Reflog => 12,
-            Self::PrFiles => 13,
-            Self::RecentRepositories => 14,
-        }
+        Self::ALL
+            .iter()
+            .position(|view| *view == self)
+            .expect("every view is listed in ViewMode::ALL")
     }
 
     pub fn next(self) -> Self {
-        match self {
-            Self::Files => Self::History,
-            Self::History => Self::Branches,
-            Self::Branches => Self::Conflicts,
-            Self::Conflicts => Self::Workspaces,
-            Self::Workspaces => Self::PullRequests,
-            Self::PullRequests => Self::GitHubRepositories,
-            Self::GitHubRepositories => Self::Stashes,
-            Self::Stashes => Self::Remotes,
-            Self::Remotes => Self::RemoteBranches,
-            Self::RemoteBranches => Self::Tags,
-            Self::Tags => Self::Hunks,
-            Self::Hunks => Self::Reflog,
-            Self::Reflog => Self::PrFiles,
-            Self::PrFiles => Self::RecentRepositories,
-            Self::RecentRepositories => Self::Files,
-        }
+        Self::ALL[(self.index() + 1) % Self::ALL.len()]
     }
 }
 
