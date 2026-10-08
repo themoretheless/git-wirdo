@@ -269,13 +269,7 @@ impl App {
             hunk_selection: 0,
             staged_hunks: false,
         };
-        app.tracking = app
-            .repository
-            .tracking()
-            .unwrap_or_else(|error| crate::model::Tracking {
-                error: Some(format!("{error:#}")),
-                ..Default::default()
-            });
+        app.tracking = app.load_tracking();
         app.refresh_detail();
         let mut navigation = std::mem::take(&mut app.navigation);
         navigation.remember(&app, true);
@@ -289,13 +283,7 @@ impl App {
         if self.history_limit > 20 {
             self.state.commits = self.repository.history(self.history_limit)?;
         }
-        self.tracking = self
-            .repository
-            .tracking()
-            .unwrap_or_else(|error| crate::model::Tracking {
-                error: Some(format!("{error:#}")),
-                ..Default::default()
-            });
+        self.tracking = self.load_tracking();
         if self.upstream_comparison {
             self.review_files = self.repository.upstream_files()?;
         }
@@ -328,39 +316,28 @@ impl App {
         if self.browse_tracked {
             self.tracked_files = self.load_tracked_files()?;
         }
-        self.file_selection = self
-            .file_selection
-            .min(self.displayed_files().len().saturating_sub(1));
-        self.history_selection = self
-            .history_selection
-            .min(self.state.commits.len().saturating_sub(1));
-        self.branch_selection = self
-            .branch_selection
-            .min(self.state.branches.len().saturating_sub(1));
-        self.conflict_selection = self
-            .conflict_selection
-            .min(self.state.merge_state.conflicts.len().saturating_sub(1));
+        let displayed = self.displayed_files().len();
+        clamp_to(&mut self.file_selection, displayed);
+        clamp_to(&mut self.history_selection, self.state.commits.len());
+        clamp_to(&mut self.branch_selection, self.state.branches.len());
+        clamp_to(
+            &mut self.conflict_selection,
+            self.state.merge_state.conflicts.len(),
+        );
         self.load_extra()?;
         self.refresh_detail();
         Ok(())
     }
 
+    /// Load the list behind the current view, keeping its cursor inside the new bounds.
     fn load_extra(&mut self) -> Result<()> {
         match self.view {
-            ViewMode::Reflog => {
-                self.reflog = self.repository.reflog(self.reflog_limit)?;
-                self.reflog_selection = self
-                    .reflog_selection
-                    .min(self.reflog.len().saturating_sub(1));
-            }
+            ViewMode::Reflog => self.reflog = self.repository.reflog(self.reflog_limit)?,
             ViewMode::History => {
                 self.state.commits = self.repository.history(self.history_limit)?;
                 if self.graph_visible {
                     self.history_graph = self.repository.history_graph(self.history_limit)?;
                 }
-                self.history_selection = self
-                    .history_selection
-                    .min(self.state.commits.len().saturating_sub(1));
             }
             ViewMode::Hunks => {
                 self.hunks = if self.browse_tracked || self.upstream_comparison {
@@ -370,50 +347,20 @@ impl App {
                 } else {
                     Vec::new()
                 };
-                self.hunk_selection = self.hunk_selection.min(self.hunks.len().saturating_sub(1));
             }
-            ViewMode::Tags => {
-                self.tags = self.repository.tags()?;
-                self.tag_selection = self.tag_selection.min(self.tags.len().saturating_sub(1));
-            }
-            ViewMode::Remotes => {
-                self.remotes = self.repository.remotes()?;
-                self.remote_selection = self
-                    .remote_selection
-                    .min(self.remotes.len().saturating_sub(1));
-            }
-            ViewMode::RemoteBranches => {
-                self.remote_branches = self.repository.remote_branches()?;
-                self.remote_branch_selection = self
-                    .remote_branch_selection
-                    .min(self.remote_branches.len().saturating_sub(1));
-            }
-            ViewMode::Stashes => {
-                self.stashes = self.repository.stashes()?;
-                self.stash_selection = self
-                    .stash_selection
-                    .min(self.stashes.len().saturating_sub(1));
-            }
+            ViewMode::Tags => self.tags = self.repository.tags()?,
+            ViewMode::Remotes => self.remotes = self.repository.remotes()?,
+            ViewMode::RemoteBranches => self.remote_branches = self.repository.remote_branches()?,
+            ViewMode::Stashes => self.stashes = self.repository.stashes()?,
             ViewMode::GitHubRepositories => {
                 self.github_repositories = crate::github::repositories(self.repository.root())?;
-                self.github_repo_selection = self
-                    .github_repo_selection
-                    .min(self.github_repositories.len().saturating_sub(1));
             }
-            ViewMode::Workspaces => {
-                self.workspaces = self.repository.workspaces()?;
-                self.workspace_selection = self
-                    .workspace_selection
-                    .min(self.workspaces.len().saturating_sub(1));
-            }
+            ViewMode::Workspaces => self.workspaces = self.repository.workspaces()?,
             ViewMode::PrFiles => {
                 self.pr_files.clear();
                 if let Some(pr) = &self.review_pr {
                     self.pr_files = crate::pr_review::reviewed_files(self.repository.root(), pr)?;
                 }
-                self.pr_file_selection = self
-                    .pr_file_selection
-                    .min(self.pr_files.len().saturating_sub(1));
             }
             ViewMode::PullRequests => {
                 let selected = self
@@ -427,12 +374,12 @@ impl App {
                 {
                     self.pr_selection = index;
                 }
-                self.pr_selection = self
-                    .pr_selection
-                    .min(self.pull_requests.len().saturating_sub(1));
             }
-            _ => {}
+            ViewMode::Files | ViewMode::Branches | ViewMode::Conflicts => {}
+            ViewMode::RecentRepositories => {}
         }
+        let (selection, len) = self.cursor();
+        clamp_to(selection, len);
         Ok(())
     }
 
@@ -457,8 +404,16 @@ impl App {
     }
 
     fn move_selection(&mut self, delta: isize) {
+        let (selection, len) = self.cursor();
+        *selection = selection.saturating_add_signed(delta);
+        clamp_to(selection, len);
+        self.refresh_detail();
+    }
+
+    /// The current view's cursor and the length of the list it points into.
+    fn cursor(&mut self) -> (&mut usize, usize) {
         let file_len = self.displayed_files().len();
-        let (selection, len) = match self.view {
+        match self.view {
             ViewMode::RecentRepositories => (
                 &mut self.recent_selection,
                 self.navigation.repositories.len(),
@@ -486,11 +441,7 @@ impl App {
                 &mut self.conflict_selection,
                 self.state.merge_state.conflicts.len(),
             ),
-        };
-        *selection = selection
-            .saturating_add_signed(delta)
-            .min(len.saturating_sub(1));
-        self.refresh_detail();
+        }
     }
 
     fn refresh_detail(&mut self) {
@@ -714,11 +665,7 @@ impl App {
                     if prompt.values.len() == prompt.labels.len() {
                         let prompt = self.prompt.take().unwrap();
                         if let Err(error) = self.submit_prompt(prompt) {
-                            self.detail_scroll = 0;
-                            self.detail_column = 0;
-                            self.message = format!("{error:#}");
-                            self.detail_text = format!("Action failed\n\n{}", self.message);
-                            self.message_is_error = true;
+                            self.report_error(error);
                         }
                     }
                 }
@@ -804,16 +751,15 @@ impl App {
             }
             PromptKind::ImportPatch => {
                 ensure!(v[1] == "apply", "Import cancelled: type apply exactly");
-                let result = self
-                    .repository
-                    .import_mail_patch(std::path::Path::new(&v[0]));
-                let refreshed = self.refresh();
+                let result = self.refresh_after(|app| {
+                    app.repository
+                        .import_mail_patch(std::path::Path::new(&v[0]))
+                });
                 if self.state.merge_state.am_in_progress {
                     self.view = ViewMode::Conflicts;
                     self.refresh_detail();
                 }
                 result?;
-                refreshed?;
                 "Imported mail patch".into()
             }
 
@@ -867,10 +813,8 @@ impl App {
                     v[1] == request.target,
                     "Reset cancelled: confirm full target commit ID"
                 );
-                let result = self.repository.reset_commit(&request, mode);
-                let refreshed = self.refresh();
-                let recovery = result?;
-                refreshed?;
+                let recovery =
+                    self.refresh_after(|app| app.repository.reset_commit(&request, mode))?;
                 format!(
                     "Reset {} to {}; previous HEAD saved as {}",
                     v[0], request.target, recovery
@@ -902,10 +846,7 @@ impl App {
             }
             PromptKind::RestoreFile(request) => {
                 ensure!(v[0] == "discard", "Discard cancelled");
-                let result = self.repository.restore_file(&request);
-                let refreshed = self.refresh();
-                result?;
-                refreshed?;
+                self.refresh_after(|app| app.repository.restore_file(&request))?;
                 "Restored selected file".into()
             }
             PromptKind::CreateTag => {
@@ -953,25 +894,16 @@ impl App {
                 "Updated upstream".into()
             }
             PromptKind::PublishBranch => {
-                let result = self.repository.publish_branch(&v[0]);
-                let refreshed = self.refresh();
-                result?;
-                refreshed?;
+                self.refresh_after(|app| app.repository.publish_branch(&v[0]))?;
                 "Published current branch and set upstream".into()
             }
             PromptKind::PullStrategy => {
-                let result = self.repository.pull_strategy(&v[0]);
-                let refreshed = self.refresh();
-                result?;
-                refreshed?;
+                self.refresh_after(|app| app.repository.pull_strategy(&v[0]))?;
                 "Pulled changes".into()
             }
 
             PromptKind::SaveStash => {
-                let result = self.repository.save_stash(&v[0]);
-                let refreshed = self.refresh();
-                result?;
-                refreshed?;
+                self.refresh_after(|app| app.repository.save_stash(&v[0]))?;
                 "Saved stash including untracked files".into()
             }
             PromptKind::ApplyStash(stash, pop) => {
@@ -979,10 +911,7 @@ impl App {
                     v[0] == if pop { "pop" } else { "apply" },
                     "Stash operation cancelled"
                 );
-                let result = self.repository.apply_stash(&stash, pop);
-                let refreshed = self.refresh();
-                result?;
-                refreshed?;
+                self.refresh_after(|app| app.repository.apply_stash(&stash, pop))?;
                 if pop {
                     "Applied and removed stash".into()
                 } else {
@@ -997,14 +926,13 @@ impl App {
 
             PromptKind::Commit(amend) => {
                 // Reload after hooks even when they fail, preserving partial state changes.
-                let result = if amend {
-                    self.repository.amend(&v[0])
-                } else {
-                    self.repository.commit(&v[0])
-                };
-                let refreshed = self.refresh();
-                result?;
-                refreshed?;
+                self.refresh_after(|app| {
+                    if amend {
+                        app.repository.amend(&v[0])
+                    } else {
+                        app.repository.commit(&v[0])
+                    }
+                })?;
                 "Committed changes".into()
             }
             PromptKind::Branch => {
@@ -1025,10 +953,7 @@ impl App {
                     v[0] == if rebase { "rebase" } else { "merge" },
                     "Operation cancelled: confirmation does not match"
                 );
-                let result = self.repository.integrate_branch(&name, rebase);
-                let refreshed = self.refresh();
-                result?;
-                refreshed?;
+                self.refresh_after(|app| app.repository.integrate_branch(&name, rebase))?;
                 "Branch integrated".into()
             }
 
@@ -1049,12 +974,7 @@ impl App {
                 return self.open_repository(repository.root());
             }
             PromptKind::CloneRepository(name) => {
-                let path = PathBuf::from(&v[0]);
-                let path = if path.is_absolute() {
-                    path
-                } else {
-                    self.repository.root().join(path)
-                };
+                let path = self.repository.resolve(std::path::Path::new(&v[0]));
                 crate::github::clone_repository(self.repository.root(), &name, &path)?;
                 return self.open_repository(&path);
             }
@@ -1064,12 +984,7 @@ impl App {
                 "Workspace created".into()
             }
             PromptKind::OpenRepository => {
-                let path = PathBuf::from(&v[0]);
-                let path = if path.is_absolute() {
-                    path
-                } else {
-                    self.repository.root().join(path)
-                };
+                let path = self.repository.resolve(std::path::Path::new(&v[0]));
                 return self.open_repository(&path);
             }
             PromptKind::Remove(w) => {
@@ -1101,12 +1016,11 @@ impl App {
         };
         // Preserve the operation result even if a network refresh then fails.
         let refreshed = self.refresh();
-        self.message = if let Err(error) = refreshed {
+        self.notify(if let Err(error) = refreshed {
             format!("{output}\nRefresh failed: {error:#}")
         } else {
             output
-        };
-        self.message_is_error = false;
+        });
         Ok(())
     }
 
@@ -1164,10 +1078,7 @@ impl App {
     /// Git failures are recoverable UI messages, not reasons to leave the terminal in raw mode.
     pub fn handle(&mut self, action: Action) {
         if let Err(error) = self.apply(action) {
-            self.detail_scroll = 0;
-            self.message = format!("{error:#}");
-            self.detail_text = format!("Action failed\n\n{}", self.message);
-            self.message_is_error = true;
+            self.report_error(error);
         }
     }
 
@@ -1227,24 +1138,23 @@ impl App {
             Action::Remove if self.view == ViewMode::RecentRepositories => {
                 if self.recent_selection < self.navigation.repositories.len() {
                     self.navigation.repositories.remove(self.recent_selection);
-                    self.recent_selection = self
-                        .recent_selection
-                        .min(self.navigation.repositories.len().saturating_sub(1));
+                    clamp_to(
+                        &mut self.recent_selection,
+                        self.navigation.repositories.len(),
+                    );
                     self.refresh_detail();
-                    self.message = "Forgot recent entry; working tree remains on disk".into();
-                    self.message_is_error = false;
+                    self.notify("Forgot recent entry; working tree remains on disk");
                 }
             }
             Action::LoadHistory if self.view == ViewMode::PullRequests => {
                 self.pr_filter.limit = self.pr_filter.limit.saturating_add(100);
                 self.load_extra()?;
                 self.refresh_detail();
-                self.message = format!(
+                self.notify(format!(
                     "Loaded {} PRs (limit {}); search may be capped by GitHub, refine U filter",
                     self.pull_requests.len(),
                     self.pr_filter.limit
-                );
-                self.message_is_error = false;
+                ));
             }
             Action::SetUpstream if self.view == ViewMode::PullRequests => self
                 .start_prefilled_prompt(
@@ -1381,8 +1291,7 @@ impl App {
                 self.reflog_limit = self.reflog_limit.saturating_add(100);
                 self.load_extra()?;
                 self.refresh_detail();
-                self.message = format!("Loaded {} reflog entries", self.reflog.len());
-                self.message_is_error = false;
+                self.notify(format!("Loaded {} reflog entries", self.reflog.len()));
             }
             Action::ResetCommit if self.view == ViewMode::History => {
                 if let Some(commit) = self.state.commits.get(self.history_selection) {
@@ -1404,11 +1313,10 @@ impl App {
                 self.history_limit = self.history_limit.saturating_add(100);
                 self.load_extra()?;
                 self.refresh_detail();
-                self.message = format!(
+                self.notify(format!(
                     "Loaded {} commits across branches",
                     self.state.commits.len()
-                );
-                self.message_is_error = false;
+                ));
             }
             Action::CherryPick | Action::RevertCommit if self.view == ViewMode::History => {
                 if let Some(commit) = self.state.commits.get(self.history_selection) {
@@ -1663,12 +1571,10 @@ impl App {
                 if let Some(pr) = self.pull_requests.get(self.pr_selection) {
                     self.repository.ensure_clean()?;
                     let number = pr.number;
-                    let result = crate::github::checkout(self.repository.root(), number);
-                    let refreshed = self.refresh();
-                    result?;
-                    refreshed?;
-                    self.message = format!("Checked out PR #{number}");
-                    self.message_is_error = false;
+                    self.refresh_after(|app| {
+                        crate::github::checkout(app.repository.root(), number)
+                    })?;
+                    self.notify(format!("Checked out PR #{number}"));
                 }
             }
             Action::ScrollLeft => self.detail_column = self.detail_column.saturating_sub(10),
@@ -1706,13 +1612,11 @@ impl App {
                 self.upstream_comparison = !self.upstream_comparison;
                 self.file_selection = 0;
                 self.refresh_detail();
-                self.message = if self.upstream_comparison {
+                self.notify(if self.upstream_comparison {
                     "Compared with upstream merge base"
                 } else {
                     "Working changes"
-                }
-                .into();
-                self.message_is_error = false;
+                });
             }
             Action::ToggleSeen if self.view == ViewMode::Files => {
                 if let Some(file) = self.displayed_files().get(self.file_selection) {
@@ -1726,8 +1630,7 @@ impl App {
             Action::Quit => self.running = false,
             Action::Refresh => {
                 self.refresh()?;
-                self.message = "Refreshed".to_owned();
-                self.message_is_error = false;
+                self.notify("Refreshed".to_owned());
             }
             Action::NextView => {
                 self.view = self.view.next();
@@ -1847,25 +1750,87 @@ impl App {
         Ok(())
     }
 
+    /// Run a repository operation and report its success in the action line.
     fn run_action<F>(&mut self, action: F, success: impl Into<String>) -> Result<()>
     where
         F: FnOnce(&Repository) -> Result<()>,
     {
-        let result = action(&self.repository);
-        // A failed pull/rebase/hook can still change files or the index. Always reload afterwards.
-        let refreshed = self.refresh();
-        if let Err(error) = result {
-            return match refreshed {
-                Ok(()) => Err(error),
-                Err(refresh_error) => {
-                    Err(error.context(format!("Repository refresh also failed: {refresh_error:#}")))
-                }
-            };
-        }
         let success = success.into();
-        refreshed.with_context(|| format!("{success}, but refreshing the repository failed"))?;
-        self.message = success;
-        self.message_is_error = false;
-        Ok(())
+        match self.reload_after(|app| action(&app.repository)) {
+            Ok(()) => {
+                self.notify(success);
+                Ok(())
+            }
+            Err(Failure::Refresh(error)) => {
+                Err(error.context(format!("{success}, but refreshing the repository failed")))
+            }
+            Err(Failure::Operation(error)) => Err(error),
+        }
     }
+
+    /// Run an operation, then reload: a failed pull, rebase or hook can still have
+    /// changed files or the index, so the snapshot is refreshed either way.
+    fn refresh_after<T>(&mut self, operation: impl FnOnce(&mut Self) -> Result<T>) -> Result<T> {
+        self.reload_after(operation).map_err(anyhow::Error::from)
+    }
+
+    fn reload_after<T>(
+        &mut self,
+        operation: impl FnOnce(&mut Self) -> Result<T>,
+    ) -> std::result::Result<T, Failure> {
+        let result = operation(self);
+        let refreshed = self.refresh();
+        match (result, refreshed) {
+            (Ok(value), Ok(())) => Ok(value),
+            (Ok(_), Err(error)) => Err(Failure::Refresh(error)),
+            (Err(error), Ok(())) => Err(Failure::Operation(error)),
+            (Err(error), Err(refresh_error)) => Err(Failure::Operation(
+                error.context(format!("Repository refresh also failed: {refresh_error:#}")),
+            )),
+        }
+    }
+
+    /// Show a successful outcome in the action line.
+    fn notify(&mut self, message: impl Into<String>) {
+        self.message = message.into();
+        self.message_is_error = false;
+    }
+
+    /// Git and GitHub failures are recoverable: show them instead of leaving raw mode.
+    fn report_error(&mut self, error: anyhow::Error) {
+        self.detail_scroll = 0;
+        self.detail_column = 0;
+        self.message = format!("{error:#}");
+        self.detail_text = format!("Action failed\n\n{}", self.message);
+        self.message_is_error = true;
+    }
+
+    /// Tracking problems are shown in the header rather than failing the whole refresh.
+    fn load_tracking(&self) -> crate::model::Tracking {
+        self.repository
+            .tracking()
+            .unwrap_or_else(|error| crate::model::Tracking {
+                error: Some(format!("{error:#}")),
+                ..Default::default()
+            })
+    }
+}
+
+/// Which half of an operation-then-reload sequence failed.
+enum Failure {
+    Operation(anyhow::Error),
+    Refresh(anyhow::Error),
+}
+
+impl From<Failure> for anyhow::Error {
+    fn from(failure: Failure) -> Self {
+        match failure {
+            Failure::Operation(error) | Failure::Refresh(error) => error,
+        }
+    }
+}
+
+/// Keep a list cursor inside the list after it was reloaded or shortened.
+fn clamp_to(selection: &mut usize, len: usize) {
+    *selection = (*selection).min(len.saturating_sub(1));
 }

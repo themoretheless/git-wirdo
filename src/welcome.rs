@@ -56,14 +56,10 @@ impl Drop for Worker {
 }
 fn launch(base: PathBuf, operation: Operation, values: Vec<String>) -> Worker {
     launch_task(move || match operation {
-        Operation::Open => {
-            let path = Path::new(&values[0]);
-            Repository::open(&if path.is_absolute() {
-                path.to_owned()
-            } else {
-                base.join(path)
-            })
-        }
+        Operation::Open => Repository::open(&git_wirdo::git::resolve_against(
+            &base,
+            Path::new(&values[0]),
+        )),
         Operation::Initialize => Repository::initialize(&base, Path::new(&values[0]), &values[1]),
         Operation::Clone => {
             Repository::clone_into(&base, values[0].as_ref(), Path::new(&values[1]))
