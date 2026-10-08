@@ -130,22 +130,10 @@ pub fn filtered(view: ViewMode, query: &str) -> Vec<Entry> {
             view: None,
         })
         .collect();
-    for (target, title) in [
-        (ViewMode::Files, "View files"),
-        (ViewMode::History, "View commit history"),
-        (ViewMode::Branches, "View branches"),
-        (ViewMode::Conflicts, "View conflicts and operation recovery"),
-        (ViewMode::Workspaces, "View worktrees"),
-        (ViewMode::PullRequests, "View pull requests"),
-        (ViewMode::GitHubRepositories, "View GitHub repositories"),
-        (ViewMode::Stashes, "View stashes"),
-        (ViewMode::Remotes, "View remotes"),
-        (ViewMode::RemoteBranches, "View remote branches"),
-        (ViewMode::Tags, "View tags"),
-        (ViewMode::Hunks, "View hunks"),
-        (ViewMode::Reflog, "View reflog recovery"),
-        (ViewMode::RecentRepositories, "View recent repositories"),
-    ] {
+    for (target, title) in ViewMode::ALL
+        .into_iter()
+        .filter_map(|target| view_title(target).map(|title| (target, title)))
+    {
         result.push(Entry {
             title,
             action: if target == ViewMode::RecentRepositories {
@@ -167,4 +155,25 @@ pub fn filtered(view: ViewMode, query: &str) -> Vec<Entry> {
             .all(|term| entry.title.to_lowercase().contains(term))
     });
     result
+}
+
+/// Palette title for switching to a view; views that need a fresh target have none.
+fn view_title(view: ViewMode) -> Option<&'static str> {
+    Some(match view {
+        ViewMode::Files => "View files",
+        ViewMode::History => "View commit history",
+        ViewMode::Branches => "View branches",
+        ViewMode::Conflicts => "View conflicts and operation recovery",
+        ViewMode::Workspaces => "View worktrees",
+        ViewMode::PullRequests => "View pull requests",
+        ViewMode::GitHubRepositories => "View GitHub repositories",
+        ViewMode::Stashes => "View stashes",
+        ViewMode::Remotes => "View remotes",
+        ViewMode::RemoteBranches => "View remote branches",
+        ViewMode::Tags => "View tags",
+        ViewMode::Hunks => "View hunks",
+        ViewMode::Reflog => "View reflog recovery",
+        ViewMode::RecentRepositories => "View recent repositories",
+        ViewMode::PrFiles => return None,
+    })
 }

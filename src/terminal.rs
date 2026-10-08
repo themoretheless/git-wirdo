@@ -46,13 +46,19 @@ fn restore_terminal() {
     );
 }
 
-pub fn run(repository: Repository, state_path: Option<PathBuf>) -> Result<()> {
-    // Validate/load before touching the terminal; invalid repositories must not break the shell.
-    let mut session = Session::new(App::new(repository)?);
+/// Raw mode on a pipe would hang scripts, so interactive screens refuse to start without a TTY.
+pub(crate) fn require_tty() -> Result<()> {
     ensure!(
         io::stdin().is_terminal() && io::stdout().is_terminal(),
         "Interactive mode requires a terminal; use --headless for scripts"
     );
+    Ok(())
+}
+
+pub fn run(repository: Repository, state_path: Option<PathBuf>) -> Result<()> {
+    // Validate/load before touching the terminal; invalid repositories must not break the shell.
+    let mut session = Session::new(App::new(repository)?);
+    require_tty()?;
     let mut store = None;
     if let Some(path) = state_path {
         match git_wirdo::settings::Store::open(path.clone()) {

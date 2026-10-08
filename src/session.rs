@@ -2,7 +2,6 @@
 use crate::{
     app::{Action, App},
     input::action_for_key,
-    model::ViewMode,
     process::{Control, controlled},
 };
 use crossterm::event::{KeyCode, KeyEvent, KeyEventKind};
@@ -162,15 +161,11 @@ impl Session {
             self.app.handle_paste(text);
         }
     }
+    /// Keys that only edit a prompt, a search or UI state never leave the terminal thread;
+    /// the final Enter of a prompt and every Git/GitHub action go to the worker.
     fn local_key(&self, key: KeyEvent) -> bool {
-        if self.app.prompt.is_none()
-            && !self.app.searching
-            && self.app.view == ViewMode::PullRequests
-            && action_for_key(key) == Some(Action::EditRemote)
-        {
-            return false;
-        }
-        if action_for_key(key) == Some(Action::Quit) {
+        let action = action_for_key(key);
+        if action == Some(Action::Quit) {
             return true;
         }
         if let Some(prompt) = &self.app.prompt {
@@ -181,40 +176,7 @@ impl Session {
         if self.app.searching {
             return key.code != KeyCode::Enter;
         }
-        matches!(
-            action_for_key(key),
-            Some(
-                Action::CommandPalette
-                    | Action::ImportPatch
-                    | Action::ExportCommit
-                    | Action::Commit
-                    | Action::AmendCommit
-                    | Action::Branch
-                    | Action::New
-                    | Action::Search
-                    | Action::OpenRepository
-                    | Action::SaveStash
-                    | Action::SetUpstream
-                    | Action::PublishBranch
-                    | Action::PullStrategy
-                    | Action::RenameBranch
-                    | Action::MergeBranch
-                    | Action::RebaseBranch
-                    | Action::MergePr
-                    | Action::ApprovePr
-                    | Action::RequestChanges
-                    | Action::CommentPr
-                    | Action::ApplyStash
-                    | Action::PopStash
-                    | Action::EditRemote
-                    | Action::EditPushUrl
-                    | Action::DeleteRemoteTag
-                    | Action::PageDown
-                    | Action::PageUp
-                    | Action::ScrollLeft
-                    | Action::ScrollRight
-            )
-        ) || (action_for_key(key) == Some(Action::Remove) && self.app.view != ViewMode::Files)
+        action.is_some_and(|action| action.runs_locally(self.app.view))
     }
 }
 impl Drop for Session {

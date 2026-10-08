@@ -162,6 +162,11 @@ impl Repository {
         &self.root
     }
 
+    /// Interpret a user-entered path relative to this working tree's root.
+    pub fn resolve(&self, path: &Path) -> PathBuf {
+        resolve_against(&self.root, path)
+    }
+
     pub fn workspaces(&self) -> Result<Vec<crate::model::Workspace>> {
         let bytes = git(&self.root, ["worktree", "list", "--porcelain", "-z"])?;
         let mut result = Vec::new();
@@ -193,11 +198,7 @@ impl Repository {
 
     pub fn create_workspace(&self, path: &Path, branch: &str) -> Result<()> {
         git(&self.root, ["check-ref-format", "--branch", branch])?;
-        let path = if path.is_absolute() {
-            path.to_owned()
-        } else {
-            self.root.join(path)
-        };
+        let path = self.resolve(path);
         git(
             &self.root,
             [
@@ -1755,6 +1756,15 @@ fn parse_status(bytes: &[u8]) -> Result<Vec<FileEntry>> {
 }
 
 /// Validate before invoking Git: preserve files, reject symlinks and Git metadata targets.
+/// Relative paths typed by the user are relative to the directory the client works in.
+pub fn resolve_against(base: &Path, path: &Path) -> PathBuf {
+    if path.is_absolute() {
+        path.to_owned()
+    } else {
+        base.join(path)
+    }
+}
+
 fn lifecycle_destination(base: &Path, path: &Path) -> Result<PathBuf> {
     ensure!(!path.as_os_str().is_empty(), "Destination is required");
     let destination = if path.is_absolute() {
