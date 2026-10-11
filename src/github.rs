@@ -91,12 +91,14 @@ fn run_program_input(
     ensure!(
         output.status.success(),
         "GitHub command failed: {}",
-        if output.stderr.is_empty() {
-            String::from_utf8_lossy(&output.stdout)
-        } else {
-            String::from_utf8_lossy(&output.stderr)
-        }
-        .trim()
+        [
+            String::from_utf8_lossy(&output.stderr).trim(),
+            String::from_utf8_lossy(&output.stdout).trim(),
+        ]
+        .into_iter()
+        .filter(|part| !part.is_empty())
+        .collect::<Vec<_>>()
+        .join("\n")
     );
     Ok(String::from_utf8_lossy(if output.stdout.is_empty() {
         &output.stderr
@@ -732,6 +734,29 @@ mod tests {
             serde_json::from_str::<Vec<PullRequest>>(&json.replace("\"headRefOid\":\"abc\",", ""))
                 .is_err()
         );
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn api_failure_preserves_server_reason_alongside_stderr_status() {
+        use std::os::unix::fs::PermissionsExt;
+        let path = std::env::temp_dir().join(format!("wirdo-gh-error-{}", std::process::id()));
+        std::fs::create_dir_all(&path).unwrap();
+        let program = path.join("fake-gh");
+        std::fs::write(
+            &program,
+            "#!/bin/sh\necho '{\"errors\":[\"Can not approve your own pull request\"]}'\necho 'gh: Unprocessable Entity (HTTP 422)' >&2\nexit 1\n",
+        ).unwrap();
+        std::fs::set_permissions(&program, std::fs::Permissions::from_mode(0o700)).unwrap();
+        let error = run_program(&path, program.as_os_str(), &["api"])
+            .unwrap_err()
+            .to_string();
+        assert!(error.contains("HTTP 422"), "{error}");
+        assert!(
+            error.contains("Can not approve your own pull request"),
+            "{error}"
+        );
+        std::fs::remove_dir_all(path).unwrap();
     }
 
     #[cfg(unix)]

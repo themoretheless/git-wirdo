@@ -521,8 +521,19 @@ and linked worktree navigation/removal. Tests also check terminal-mode restorati
 
 GitHub acceptance uses a strict offline `gh` executable fixture and temporary
 repositories. It checks CLI arguments, JSON stdin, multiline forms, pagination,
-head/line guards, PR lifecycle and real local checkout/clone; it publishes no live
-reviews/comments and does not prove server permissions or policy acceptance.
+head/line guards, PR lifecycle and real local checkout/clone. The automated suite
+publishes no live reviews/comments.
+
+A separate [live acceptance PR #3](https://github.com/themoretheless/git-wirdo/pull/3)
+on 2026-10-11 exercised the actual Git Wirdo library with authenticated `gh`:
+draft creation, listing, literal multiline metadata editing, ready/draft changes,
+conversation and inline comments, a commit-pinned COMMENT review, checkout,
+stale metadata/head rejection, and head-pinned squash merge. The PR targeted a
+disposable base branch; both test branches were removed afterwards. GitHub
+correctly rejected self-approval and self-requested changes; successful verdicts
+from a separate reviewer and other repositories' policies remain unverified.
+API failures now preserve GitHub's JSON explanation alongside the CLI status.
+
 `terminal_background` separately checks hook cancellation and saved-state restart.
 
 `terminal_lifecycle` covers startup outside a checkout, initialization, arbitrary
