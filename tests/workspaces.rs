@@ -41,8 +41,9 @@ fn create_switch_and_remove_workspaces_preserves_dirty_files_and_branches() {
     let mut app = App::new(repo.open()).unwrap();
     app.view = ViewMode::Workspaces;
     app.refresh().unwrap();
-    app.workspace_selection = app
+    app.workspaces.selection = app
         .workspaces
+        .items
         .iter()
         .position(|w| w.branch == "topic")
         .unwrap();
@@ -80,8 +81,9 @@ fn prompts_consume_shortcuts_and_require_explicit_remove_confirmation() {
     type_text(&mut app, path.to_str().unwrap());
     type_text(&mut app, "qsc-topic");
     assert!(app.running && path.exists());
-    app.workspace_selection = app
+    app.workspaces.selection = app
         .workspaces
+        .items
         .iter()
         .position(|w| w.branch == "qsc-topic")
         .unwrap();
@@ -119,15 +121,17 @@ fn pr_checkout_refuses_dirty_work_and_merge_requires_selected_number() {
     repo.write("file", "unsaved");
     let mut app = App::new(repo.open()).unwrap();
     app.view = ViewMode::PullRequests;
-    app.pull_requests.push(git_wirdo::github::PullRequest {
-        number: 999999,
-        title: "Fixture".into(),
-        url: "https://github.com/o/r/pull/999999".into(),
-        head_ref_name: "topic".into(),
-        base_ref_name: "main".into(),
-        head_ref_oid: "abc".into(),
-        is_draft: false,
-    });
+    app.pull_requests
+        .items
+        .push(git_wirdo::github::PullRequest {
+            number: 999999,
+            title: "Fixture".into(),
+            url: "https://github.com/o/r/pull/999999".into(),
+            head_ref_name: "topic".into(),
+            base_ref_name: "main".into(),
+            head_ref_oid: "abc".into(),
+            is_draft: false,
+        });
     app.handle(Action::SwitchBranch);
     assert!(app.message.contains("Commit or stash"));
     assert_eq!(

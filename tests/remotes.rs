@@ -141,7 +141,7 @@ fn remote_removal_prompt_requires_confirmation() {
         app.handle_key(KeyEvent::new(KeyCode::Char(c), KeyModifiers::NONE));
     }
     app.handle_key(KeyEvent::new(KeyCode::Enter, KeyModifiers::NONE));
-    assert!(app.message_is_error && app.remotes.len() == 1);
+    assert!(app.message_is_error && app.remotes.items.len() == 1);
 }
 
 #[test]

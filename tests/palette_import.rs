@@ -247,7 +247,7 @@ fn palette_hunk_navigation_does_not_stage_a_different_file_from_the_tracked_brow
     app.handle(Action::CommandPalette);
     field(&mut app, "view hunks");
     assert_eq!(app.view, ViewMode::Hunks);
-    assert!(app.hunks.is_empty());
+    assert!(app.hunks.items.is_empty());
     app.handle(Action::Stage);
     assert!(repo.git(&["diff", "--cached"]).is_empty());
 }

@@ -195,7 +195,7 @@ impl App {
                 self.refresh_detail();
                 self.notify(format!(
                     "Loaded {} PRs (limit {}); search may be capped by GitHub, refine U filter",
-                    self.pull_requests.len(),
+                    self.pull_requests.items.len(),
                     self.pr_filter.limit
                 ));
             }
@@ -209,7 +209,7 @@ impl App {
                     vec![self.pr_filter.state.clone(), self.pr_filter.search.clone()],
                 ),
             Action::EditRemote if self.view == ViewMode::PullRequests => {
-                if let Some(pr) = self.pull_requests.get(self.pr_selection) {
+                if let Some(pr) = self.pull_requests.selected() {
                     let expected = crate::github::editable(self.repository.root(), pr.number)?;
                     self.message = format!("Edit PR #{}: {}", pr.number, pr.url);
                     let defaults = vec![
@@ -229,7 +229,7 @@ impl App {
                 }
             }
             Action::PopStash if self.view == ViewMode::PullRequests => {
-                if let Some(pr) = self.pull_requests.get(self.pr_selection).cloned() {
+                if let Some(pr) = self.pull_requests.selected().cloned() {
                     self.message = format!(
                         "PR #{} {}: {}",
                         pr.number,
@@ -247,20 +247,18 @@ impl App {
                 }
             }
             Action::OpenHunks if self.view == ViewMode::PullRequests => {
-                if let Some(pr) = self.pull_requests.get(self.pr_selection).cloned() {
+                if let Some(pr) = self.pull_requests.selected().cloned() {
                     self.review_pr = Some(pr);
-                    self.pr_files.clear();
-                    self.pr_file_selection = 0;
+                    self.pr_files.items.clear();
+                    self.pr_files.selection = 0;
                     self.view = ViewMode::PrFiles;
                     self.load_extra()?;
                     self.refresh_detail();
                 }
             }
             Action::CommentPr if self.view == ViewMode::PrFiles => {
-                if let (Some(pr), Some(file)) = (
-                    self.review_pr.as_ref(),
-                    self.pr_files.get(self.pr_file_selection),
-                ) {
+                if let (Some(pr), Some(file)) = (self.review_pr.as_ref(), self.pr_files.selected())
+                {
                     self.message = format!(
                         "Comment PR #{} {} at reviewed head {}",
                         pr.number,
@@ -322,7 +320,7 @@ impl App {
                 self.refresh_detail();
             }
             Action::New if self.view == ViewMode::Reflog => {
-                if let Some(entry) = self.reflog.get(self.reflog_selection) {
+                if let Some(entry) = self.reflog.selected() {
                     self.message = format!("Recover {}: {}", entry.sha, entry.subject);
                     self.start_prompt(
                         PromptKind::RecoverCommit(entry.sha.clone()),
@@ -334,7 +332,7 @@ impl App {
                 self.reflog_limit = self.reflog_limit.saturating_add(100);
                 self.load_extra()?;
                 self.refresh_detail();
-                self.notify(format!("Loaded {} reflog entries", self.reflog.len()));
+                self.notify(format!("Loaded {} reflog entries", self.reflog.items.len()));
             }
             Action::ResetCommit if self.view == ViewMode::History => {
                 if let Some(commit) = self.state.commits.get(self.history_selection) {
@@ -407,13 +405,13 @@ impl App {
 
             Action::OpenHunks if self.view == ViewMode::Files && !self.upstream_comparison => {
                 self.view = ViewMode::Hunks;
-                self.hunk_selection = 0;
+                self.hunks.selection = 0;
                 self.load_extra()?;
                 self.refresh_detail();
             }
             Action::ToggleComparison if self.view == ViewMode::Hunks => {
                 self.staged_hunks = !self.staged_hunks;
-                self.hunk_selection = 0;
+                self.hunks.selection = 0;
                 self.load_extra()?;
                 self.refresh_detail();
             }
@@ -421,7 +419,7 @@ impl App {
                 if self.view == ViewMode::Hunks && !self.upstream_comparison =>
             {
                 if (action == Action::Unstage) == self.staged_hunks
-                    && let Some(hunk) = self.hunks.get(self.hunk_selection).cloned()
+                    && let Some(hunk) = self.hunks.selected().cloned()
                 {
                     self.run_action(
                         |repo| repo.apply_hunk(&hunk),
@@ -441,7 +439,7 @@ impl App {
             Action::Remove | Action::PublishBranch | Action::DeleteRemoteTag
                 if self.view == ViewMode::Tags =>
             {
-                if let Some(tag) = self.tags.get(self.tag_selection).cloned() {
+                if let Some(tag) = self.tags.selected().cloned() {
                     self.message = format!("Selected tag: {} ({})", tag.name, tag.sha);
                     match action {
                         Action::Remove => self.start_prompt(
@@ -469,7 +467,7 @@ impl App {
             Action::EditRemote | Action::EditPushUrl | Action::Remove
                 if self.view == ViewMode::Remotes =>
             {
-                if let Some(remote) = self.remotes.get(self.remote_selection) {
+                if let Some(remote) = self.remotes.selected() {
                     let name = remote.name.clone();
                     self.message = format!("Selected remote: {name}");
                     if action == Action::EditPushUrl {
@@ -497,7 +495,7 @@ impl App {
                 vec!["Pull strategy: ff-only, merge or rebase"],
             ),
             Action::SwitchBranch if self.view == ViewMode::RemoteBranches => {
-                if let Some(reference) = self.remote_branches.get(self.remote_branch_selection) {
+                if let Some(reference) = self.remote_branches.selected() {
                     self.start_prompt(
                         PromptKind::CheckoutRemote(reference.clone()),
                         vec!["New local tracking branch name"],
@@ -512,7 +510,7 @@ impl App {
             Action::ApplyStash | Action::PopStash | Action::Remove
                 if self.view == ViewMode::Stashes =>
             {
-                if let Some(stash) = self.stashes.get(self.stash_selection).cloned() {
+                if let Some(stash) = self.stashes.selected().cloned() {
                     self.message = format!("Selected {}: {}", stash.selector, stash.subject);
                     match action {
                         Action::ApplyStash => self.start_prompt(
@@ -537,7 +535,7 @@ impl App {
                 self.detail_column = 0;
             }
             Action::SwitchBranch if self.view == ViewMode::GitHubRepositories => {
-                if let Some(repo) = self.github_repositories.get(self.github_repo_selection) {
+                if let Some(repo) = self.github_repositories.selected() {
                     self.start_prompt(
                         PromptKind::CloneRepository(repo.name_with_owner.clone()),
                         vec!["Clone destination (new directory)"],
@@ -564,7 +562,7 @@ impl App {
                 ],
             ),
             Action::Remove if self.view == ViewMode::Workspaces => {
-                if let Some(w) = self.workspaces.get(self.workspace_selection).cloned() {
+                if let Some(w) = self.workspaces.selected().cloned() {
                     self.message = format!("Remove {}? Branch will remain.", display_path(&w.path));
                     self.start_prompt(PromptKind::Remove(w), vec!["Type remove to confirm"]);
                 }
@@ -572,7 +570,7 @@ impl App {
             Action::MergePr | Action::ApprovePr | Action::RequestChanges | Action::CommentPr
                 if self.view == ViewMode::PullRequests =>
             {
-                if let Some(pr) = self.pull_requests.get(self.pr_selection).cloned() {
+                if let Some(pr) = self.pull_requests.selected().cloned() {
                     self.message = format!("Selected PR #{}: {} ({})", pr.number, pr.title, pr.url);
                     match action {
                         Action::MergePr => self.start_prompt(
@@ -595,7 +593,7 @@ impl App {
                 }
             }
             Action::PrDiff if self.view == ViewMode::PullRequests => {
-                if let Some(pr) = self.pull_requests.get(self.pr_selection) {
+                if let Some(pr) = self.pull_requests.selected() {
                     self.detail_text = crate::github::run(
                         self.repository.root(),
                         &["pr", "diff", &pr.number.to_string(), "--color", "never"],
@@ -605,13 +603,13 @@ impl App {
                 }
             }
             Action::SwitchBranch if self.view == ViewMode::Workspaces => {
-                if let Some(w) = self.workspaces.get(self.workspace_selection) {
+                if let Some(w) = self.workspaces.selected() {
                     let path = w.path.clone();
                     self.open_repository(&path)?;
                 }
             }
             Action::SwitchBranch if self.view == ViewMode::PullRequests => {
-                if let Some(pr) = self.pull_requests.get(self.pr_selection) {
+                if let Some(pr) = self.pull_requests.selected() {
                     self.repository.ensure_clean()?;
                     let number = pr.number;
                     self.refresh_after(|app| {
@@ -738,7 +736,7 @@ impl App {
                 }
             }
             Action::Fetch if self.view == ViewMode::Remotes => {
-                if let Some(remote) = self.remotes.get(self.remote_selection) {
+                if let Some(remote) = self.remotes.selected() {
                     let name = remote.name.clone();
                     self.run_action(|repo| repo.fetch_remote(&name), "Fetched selected remote")?;
                 }

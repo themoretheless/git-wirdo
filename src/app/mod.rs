@@ -31,8 +31,7 @@ pub struct App {
     pub history_limit: usize,
     pub graph_visible: bool,
     pub history_graph: String,
-    pub reflog: Vec<crate::model::ReflogEntry>,
-    pub reflog_selection: usize,
+    pub reflog: Listed<crate::model::ReflogEntry>,
     pub reflog_limit: usize,
     pub branch_selection: usize,
     pub conflict_selection: usize,
@@ -50,29 +49,20 @@ pub struct App {
     pub seen: HashMap<(bool, PathBuf), String>,
     pub search: String,
     pub searching: bool,
-    pub workspaces: Vec<crate::model::Workspace>,
-    pub pull_requests: Vec<crate::github::PullRequest>,
-    pub workspace_selection: usize,
-    pub pr_selection: usize,
+    pub workspaces: Listed<crate::model::Workspace>,
+    pub pull_requests: Listed<crate::github::PullRequest>,
     pub pr_filter: crate::github::PrFilter,
     pub review_pr: Option<crate::github::PullRequest>,
-    pub pr_files: Vec<crate::pr_review::PrFile>,
-    pub pr_file_selection: usize,
+    pub pr_files: Listed<crate::pr_review::PrFile>,
     pub prompt: Option<Prompt>,
     pub palette_selection: usize,
-    pub github_repositories: Vec<crate::github::GitHubRepo>,
-    pub github_repo_selection: usize,
-    pub stashes: Vec<crate::model::StashEntry>,
-    pub stash_selection: usize,
-    pub remotes: Vec<crate::model::RemoteEntry>,
-    pub remote_branches: Vec<String>,
-    pub remote_selection: usize,
-    pub remote_branch_selection: usize,
+    pub github_repositories: Listed<crate::github::GitHubRepo>,
+    pub stashes: Listed<crate::model::StashEntry>,
+    pub remotes: Listed<crate::model::RemoteEntry>,
+    pub remote_branches: Listed<String>,
     pub tracking: crate::model::Tracking,
-    pub tags: Vec<crate::model::TagEntry>,
-    pub tag_selection: usize,
-    pub hunks: Vec<crate::patch::Hunk>,
-    pub hunk_selection: usize,
+    pub tags: Listed<crate::model::TagEntry>,
+    pub hunks: Listed<crate::patch::Hunk>,
     pub staged_hunks: bool,
 }
 
@@ -113,8 +103,7 @@ impl App {
             history_limit: 20,
             graph_visible: false,
             history_graph: String::new(),
-            reflog: Vec::new(),
-            reflog_selection: 0,
+            reflog: Listed::default(),
             reflog_limit: 100,
             branch_selection: 0,
             conflict_selection: 0,
@@ -132,29 +121,20 @@ impl App {
             seen: HashMap::new(),
             search: String::new(),
             searching: false,
-            workspaces: Vec::new(),
-            pull_requests: Vec::new(),
-            workspace_selection: 0,
-            pr_selection: 0,
+            workspaces: Listed::default(),
+            pull_requests: Listed::default(),
             pr_filter: crate::github::PrFilter::default(),
             review_pr: None,
-            pr_files: Vec::new(),
-            pr_file_selection: 0,
+            pr_files: Listed::default(),
             prompt: None,
             palette_selection: 0,
-            github_repositories: Vec::new(),
-            github_repo_selection: 0,
-            stashes: Vec::new(),
-            stash_selection: 0,
-            remotes: Vec::new(),
-            remote_branches: Vec::new(),
-            remote_selection: 0,
-            remote_branch_selection: 0,
+            github_repositories: Listed::default(),
+            stashes: Listed::default(),
+            remotes: Listed::default(),
+            remote_branches: Listed::default(),
             tracking: crate::model::Tracking::default(),
-            tags: Vec::new(),
-            tag_selection: 0,
-            hunks: Vec::new(),
-            hunk_selection: 0,
+            tags: Listed::default(),
+            hunks: Listed::default(),
             staged_hunks: false,
         };
         app.tracking = app.load_tracking();
@@ -226,7 +206,7 @@ impl App {
     /// Git command once.
     fn load_view(&mut self, state_is_fresh: bool) -> Result<()> {
         match self.view {
-            ViewMode::Reflog => self.reflog = self.repository.reflog(self.reflog_limit)?,
+            ViewMode::Reflog => self.reflog.items = self.repository.reflog(self.reflog_limit)?,
             ViewMode::History => {
                 if !state_is_fresh {
                     self.state.commits = self.repository.history(self.history_limit)?;
@@ -236,7 +216,7 @@ impl App {
                 }
             }
             ViewMode::Hunks => {
-                self.hunks = if self.browse_tracked || self.upstream_comparison {
+                self.hunks.items = if self.browse_tracked || self.upstream_comparison {
                     Vec::new()
                 } else if let Some(file) = self.state.files.get(self.file_selection) {
                     self.repository.hunks(file, self.staged_hunks)?
@@ -244,31 +224,36 @@ impl App {
                     Vec::new()
                 };
             }
-            ViewMode::Tags => self.tags = self.repository.tags()?,
-            ViewMode::Remotes => self.remotes = self.repository.remotes()?,
-            ViewMode::RemoteBranches => self.remote_branches = self.repository.remote_branches()?,
-            ViewMode::Stashes => self.stashes = self.repository.stashes()?,
-            ViewMode::GitHubRepositories => {
-                self.github_repositories = crate::github::repositories(self.repository.root())?;
+            ViewMode::Tags => self.tags.items = self.repository.tags()?,
+            ViewMode::Remotes => self.remotes.items = self.repository.remotes()?,
+            ViewMode::RemoteBranches => {
+                self.remote_branches.items = self.repository.remote_branches()?
             }
-            ViewMode::Workspaces => self.workspaces = self.repository.workspaces()?,
+            ViewMode::Stashes => self.stashes.items = self.repository.stashes()?,
+            ViewMode::GitHubRepositories => {
+                self.github_repositories.items =
+                    crate::github::repositories(self.repository.root())?;
+            }
+            ViewMode::Workspaces => self.workspaces.items = self.repository.workspaces()?,
             ViewMode::PrFiles => {
-                self.pr_files.clear();
+                self.pr_files.items.clear();
                 if let Some(pr) = &self.review_pr {
-                    self.pr_files = crate::pr_review::reviewed_files(self.repository.root(), pr)?;
+                    self.pr_files.items =
+                        crate::pr_review::reviewed_files(self.repository.root(), pr)?;
                 }
             }
             ViewMode::PullRequests => {
                 let selected = self
                     .pull_requests
-                    .get(self.pr_selection)
+                    .items
+                    .get(self.pull_requests.selection)
                     .map(|pr| pr.number);
-                self.pull_requests =
+                self.pull_requests.items =
                     crate::github::list_filtered(self.repository.root(), &self.pr_filter)?;
-                if let Some(index) =
-                    selected.and_then(|n| self.pull_requests.iter().position(|p| p.number == n))
+                if let Some(index) = selected
+                    .and_then(|n| self.pull_requests.items.iter().position(|p| p.number == n))
                 {
-                    self.pr_selection = index;
+                    self.pull_requests.selection = index;
                 }
             }
             ViewMode::Files | ViewMode::Branches | ViewMode::Conflicts => {}
@@ -282,20 +267,20 @@ impl App {
     pub fn selection(&self) -> usize {
         match self.view {
             ViewMode::RecentRepositories => self.recent_selection,
-            ViewMode::PrFiles => self.pr_file_selection,
-            ViewMode::Reflog => self.reflog_selection,
-            ViewMode::Hunks => self.hunk_selection,
-            ViewMode::Tags => self.tag_selection,
-            ViewMode::Remotes => self.remote_selection,
-            ViewMode::RemoteBranches => self.remote_branch_selection,
-            ViewMode::Stashes => self.stash_selection,
+            ViewMode::PrFiles => self.pr_files.selection,
+            ViewMode::Reflog => self.reflog.selection,
+            ViewMode::Hunks => self.hunks.selection,
+            ViewMode::Tags => self.tags.selection,
+            ViewMode::Remotes => self.remotes.selection,
+            ViewMode::RemoteBranches => self.remote_branches.selection,
+            ViewMode::Stashes => self.stashes.selection,
             ViewMode::Files => self.file_selection,
             ViewMode::History => self.history_selection,
             ViewMode::Branches => self.branch_selection,
             ViewMode::Conflicts => self.conflict_selection,
-            ViewMode::GitHubRepositories => self.github_repo_selection,
-            ViewMode::Workspaces => self.workspace_selection,
-            ViewMode::PullRequests => self.pr_selection,
+            ViewMode::GitHubRepositories => self.github_repositories.selection,
+            ViewMode::Workspaces => self.workspaces.selection,
+            ViewMode::PullRequests => self.pull_requests.selection,
         }
     }
 
@@ -314,29 +299,23 @@ impl App {
                 &mut self.recent_selection,
                 self.navigation.repositories.len(),
             ),
-            ViewMode::PrFiles => (&mut self.pr_file_selection, self.pr_files.len()),
-            ViewMode::Reflog => (&mut self.reflog_selection, self.reflog.len()),
-            ViewMode::Hunks => (&mut self.hunk_selection, self.hunks.len()),
-            ViewMode::Tags => (&mut self.tag_selection, self.tags.len()),
-            ViewMode::Remotes => (&mut self.remote_selection, self.remotes.len()),
-            ViewMode::RemoteBranches => (
-                &mut self.remote_branch_selection,
-                self.remote_branches.len(),
-            ),
-            ViewMode::Stashes => (&mut self.stash_selection, self.stashes.len()),
             ViewMode::Files => (&mut self.file_selection, file_len),
             ViewMode::History => (&mut self.history_selection, self.state.commits.len()),
             ViewMode::Branches => (&mut self.branch_selection, self.state.branches.len()),
-            ViewMode::GitHubRepositories => (
-                &mut self.github_repo_selection,
-                self.github_repositories.len(),
-            ),
-            ViewMode::Workspaces => (&mut self.workspace_selection, self.workspaces.len()),
-            ViewMode::PullRequests => (&mut self.pr_selection, self.pull_requests.len()),
             ViewMode::Conflicts => (
                 &mut self.conflict_selection,
                 self.state.merge_state.conflicts.len(),
             ),
+            ViewMode::PrFiles => self.pr_files.cursor(),
+            ViewMode::Reflog => self.reflog.cursor(),
+            ViewMode::Hunks => self.hunks.cursor(),
+            ViewMode::Tags => self.tags.cursor(),
+            ViewMode::Remotes => self.remotes.cursor(),
+            ViewMode::RemoteBranches => self.remote_branches.cursor(),
+            ViewMode::Stashes => self.stashes.cursor(),
+            ViewMode::GitHubRepositories => self.github_repositories.cursor(),
+            ViewMode::Workspaces => self.workspaces.cursor(),
+            ViewMode::PullRequests => self.pull_requests.cursor(),
         }
     }
 
@@ -485,6 +464,34 @@ impl From<Failure> for anyhow::Error {
         match failure {
             Failure::Operation(error) | Failure::Refresh(error) => error,
         }
+    }
+}
+
+/// A loaded list and the cursor into it, kept together so they cannot drift apart.
+#[derive(Debug, Clone)]
+pub struct Listed<T> {
+    pub items: Vec<T>,
+    pub selection: usize,
+}
+
+impl<T> Default for Listed<T> {
+    fn default() -> Self {
+        Self {
+            items: Vec::new(),
+            selection: 0,
+        }
+    }
+}
+
+impl<T> Listed<T> {
+    /// The entry under the cursor, if the list is not empty.
+    pub fn selected(&self) -> Option<&T> {
+        self.items.get(self.selection)
+    }
+
+    /// The cursor and the length it must stay below.
+    fn cursor(&mut self) -> (&mut usize, usize) {
+        (&mut self.selection, self.items.len())
     }
 }
 

@@ -90,13 +90,13 @@ fn tui_selects_hunk_and_switches_between_index_and_working_diff() {
     repo.write("file", &lines("FIRST", "LAST"));
     let mut app = App::new(repo.open()).unwrap();
     app.handle(Action::OpenHunks);
-    assert_eq!(app.hunks.len(), 2);
+    assert_eq!(app.hunks.items.len(), 2);
     app.handle(Action::NextItem);
     app.handle(Action::Stage);
     assert!(repo.git(&["show", ":file"]).contains("LAST\n"));
     assert!(repo.git(&["show", ":file"]).contains("first\n"));
     app.handle(Action::ToggleComparison);
-    assert!(app.staged_hunks && app.hunks.len() == 1);
+    assert!(app.staged_hunks && app.hunks.items.len() == 1);
     app.handle(Action::Unstage);
     assert!(repo.git(&["diff", "--cached"]).is_empty());
 }
@@ -125,7 +125,7 @@ fn upstream_review_never_stages_a_cached_hunk() {
     repo.write("file", "changed\n");
     let mut app = App::new(repo.open()).unwrap();
     app.handle(Action::OpenHunks);
-    assert_eq!(app.hunks.len(), 1);
+    assert_eq!(app.hunks.items.len(), 1);
     app.upstream_comparison = true;
     app.handle(Action::Stage);
     assert!(repo.git(&["diff", "--cached"]).is_empty());

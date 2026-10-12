@@ -215,7 +215,7 @@ fn tui_requires_mode_and_full_sha_then_recovers_without_destroying_current_work(
     assert!(app.message.contains("refs/git-wirdo/recovery"));
     app.view = ViewMode::Reflog;
     app.refresh().unwrap();
-    app.reflog_selection = app.reflog.iter().position(|e| e.sha == head).unwrap();
+    app.reflog.selection = app.reflog.items.iter().position(|e| e.sha == head).unwrap();
     app.handle(Action::New);
     submit(&mut app, "saved");
     assert!(!app.message_is_error, "{}", app.message);

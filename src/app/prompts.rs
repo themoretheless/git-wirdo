@@ -128,8 +128,8 @@ impl App {
                 filter.validate()?;
                 let prs = crate::github::list_filtered(self.repository.root(), &filter)?;
                 self.pr_filter = filter;
-                self.pull_requests = prs;
-                self.pr_selection = 0;
+                self.pull_requests.items = prs;
+                self.pull_requests.selection = 0;
                 "Updated PR filter".into()
             }
             PromptKind::EditPr(expected) => {

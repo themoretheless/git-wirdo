@@ -114,7 +114,7 @@ fn tag_dialog_requires_confirmed_local_deletion() {
         }
         app.handle_key(KeyEvent::new(KeyCode::Enter, KeyModifiers::NONE));
     }
-    assert_eq!(app.tags[0].name, "ui-tag");
+    assert_eq!(app.tags.items[0].name, "ui-tag");
     app.handle(Action::Remove);
     app.handle_key(KeyEvent::new(KeyCode::Esc, KeyModifiers::NONE));
     assert_eq!(app.repository.tags().unwrap().len(), 1);
@@ -123,5 +123,5 @@ fn tag_dialog_requires_confirmed_local_deletion() {
         app.handle_key(KeyEvent::new(KeyCode::Char(c), KeyModifiers::NONE));
     }
     app.handle_key(KeyEvent::new(KeyCode::Enter, KeyModifiers::NONE));
-    assert!(app.tags.is_empty());
+    assert!(app.tags.items.is_empty());
 }

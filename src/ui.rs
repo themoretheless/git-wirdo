@@ -233,6 +233,7 @@ fn list_items(app: &App) -> (Vec<ListItem<'static>>, bool) {
         ),
         ViewMode::Hunks => (
             app.hunks
+                .items
                 .iter()
                 .enumerate()
                 .map(|(i, h)| {
@@ -248,18 +249,20 @@ fn list_items(app: &App) -> (Vec<ListItem<'static>>, bool) {
         ),
         ViewMode::Tags => (
             app.tags
+                .items
                 .iter()
                 .map(|t| format!("{} [{}] {}", t.name, t.kind, t.subject))
                 .collect(),
             "No tags",
         ),
         ViewMode::Remotes => (
-            app.remotes.iter().map(|r| r.name.clone()).collect(),
+            app.remotes.items.iter().map(|r| r.name.clone()).collect(),
             "No remotes",
         ),
-        ViewMode::RemoteBranches => (app.remote_branches.clone(), "No remote branches"),
+        ViewMode::RemoteBranches => (app.remote_branches.items.clone(), "No remote branches"),
         ViewMode::Stashes => (
             app.stashes
+                .items
                 .iter()
                 .map(|s| format!("{} {}", s.selector, s.subject))
                 .collect(),
@@ -267,6 +270,7 @@ fn list_items(app: &App) -> (Vec<ListItem<'static>>, bool) {
         ),
         ViewMode::GitHubRepositories => (
             app.github_repositories
+                .items
                 .iter()
                 .map(|r| r.name_with_owner.clone())
                 .collect(),
@@ -274,6 +278,7 @@ fn list_items(app: &App) -> (Vec<ListItem<'static>>, bool) {
         ),
         ViewMode::Workspaces => (
             app.workspaces
+                .items
                 .iter()
                 .map(|w| {
                     format!(
@@ -288,6 +293,7 @@ fn list_items(app: &App) -> (Vec<ListItem<'static>>, bool) {
         ),
         ViewMode::PrFiles => (
             app.pr_files
+                .items
                 .iter()
                 .map(|file| format!("{} {}", file.status, file.filename.escape_debug()))
                 .collect(),
@@ -295,6 +301,7 @@ fn list_items(app: &App) -> (Vec<ListItem<'static>>, bool) {
         ),
         ViewMode::PullRequests => (
             app.pull_requests
+                .items
                 .iter()
                 .map(|pr| {
                     format!(
@@ -329,6 +336,7 @@ fn list_items(app: &App) -> (Vec<ListItem<'static>>, bool) {
         ),
         ViewMode::Reflog => (
             app.reflog
+                .items
                 .iter()
                 .map(|e| format!("{} {} {}", e.selector, e.sha, e.subject))
                 .collect(),

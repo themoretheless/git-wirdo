@@ -11,28 +11,28 @@ impl App {
                 Some(settings) => Ok(format!("{}\nSaved view: {:?}\nEnter opens this working tree; O opens another path.\nD forgets this entry without deleting any files.", display_path(&settings.root.path()?), settings.view)),
                 None => Ok("No recent repositories; O opens a local repository.".into()),
             },
-            ViewMode::PrFiles => match (self.review_pr.as_ref(), self.pr_files.get(self.pr_file_selection)) {
+            ViewMode::PrFiles => match (self.review_pr.as_ref(), self.pr_files.selected()) {
                 (Some(pr), Some(file)) => file.detail(pr),
                 _ => Ok("No PR file selected; use i in PullRequests to load reviewed files.".into()),
             },
-            ViewMode::Reflog => match self.reflog.get(self.reflog_selection) {
+            ViewMode::Reflog => match self.reflog.selected() {
                 Some(entry) => self.repository.commit_detail(&crate::model::CommitEntry { sha: entry.sha.clone(), short_sha: String::new(), date: String::new(), author: String::new(), subject: entry.subject.clone() }),
                 None => Ok("No reflog entry selected".into()),
             },
-            ViewMode::Hunks => Ok(self.hunks.get(self.hunk_selection).map(|hunk| format!("{} hunk {}/{}\n{}\n\n{}", if hunk.staged { "Staged" } else { "Unstaged" }, self.hunk_selection + 1, self.hunks.len(), display_path(&hunk.file.path), String::from_utf8_lossy(&hunk.patch))).unwrap_or_else(|| "No text hunks. d switches staged/unstaged. Use full-file staging for untracked, binary, rename or mode changes.".into())),
-            ViewMode::Tags => match self.tags.get(self.tag_selection) {
+            ViewMode::Hunks => Ok(self.hunks.selected().map(|hunk| format!("{} hunk {}/{}\n{}\n\n{}", if hunk.staged { "Staged" } else { "Unstaged" }, self.hunks.selection + 1, self.hunks.items.len(), display_path(&hunk.file.path), String::from_utf8_lossy(&hunk.patch))).unwrap_or_else(|| "No text hunks. d switches staged/unstaged. Use full-file staging for untracked, binary, rename or mode changes.".into())),
+            ViewMode::Tags => match self.tags.selected() {
                 Some(tag) => Ok(format!("{} ({})\n{}\n\n{}", tag.name, tag.kind, tag.sha, self.repository.tag_detail(tag)?)),
                 None => Ok("No tags; N creates one.".into()),
             },
-            ViewMode::Remotes => Ok(self.remotes.get(self.remote_selection).map(|r| format!("{}\nFetch URLs:\n{}\nPush URLs:\n{}", r.name, r.fetch_urls, r.push_urls)).unwrap_or_else(|| "No remotes. N adds one.".into())),
-            ViewMode::RemoteBranches => Ok(self.remote_branches.get(self.remote_branch_selection).map(|b| format!("{b}\nEnter creates a tracking local branch; U sets current upstream.")).unwrap_or_else(|| "No remote branches; fetch first.".into())),
-            ViewMode::Stashes => match self.stashes.get(self.stash_selection) {
+            ViewMode::Remotes => Ok(self.remotes.selected().map(|r| format!("{}\nFetch URLs:\n{}\nPush URLs:\n{}", r.name, r.fetch_urls, r.push_urls)).unwrap_or_else(|| "No remotes. N adds one.".into())),
+            ViewMode::RemoteBranches => Ok(self.remote_branches.selected().map(|b| format!("{b}\nEnter creates a tracking local branch; U sets current upstream.")).unwrap_or_else(|| "No remote branches; fetch first.".into())),
+            ViewMode::Stashes => match self.stashes.selected() {
                 Some(stash) => Ok(format!("{} {}\n{}\n\n{}", stash.selector, stash.subject, stash.sha, self.repository.stash_detail(stash)?)),
                 None => Ok("No stashes. S saves tracked and untracked changes.".into()),
             },
-            ViewMode::GitHubRepositories => Ok(self.github_repositories.get(self.github_repo_selection).map(|r| format!("{}\n{}\nPrivate: {}\nEnter clone and open", r.name_with_owner, r.url, r.is_private)).unwrap_or_else(|| "No GitHub repositories".into())),
-            ViewMode::Workspaces => Ok(self.workspaces.get(self.workspace_selection).map(|w| format!("{}\nBranch: {}\nLocked: {}\nEnter open | N create | D remove", display_path(&w.path), w.branch, w.locked)).unwrap_or_else(|| "No workspace".into())),
-            ViewMode::PullRequests => match self.pull_requests.get(self.pr_selection) {
+            ViewMode::GitHubRepositories => Ok(self.github_repositories.selected().map(|r| format!("{}\n{}\nPrivate: {}\nEnter clone and open", r.name_with_owner, r.url, r.is_private)).unwrap_or_else(|| "No GitHub repositories".into())),
+            ViewMode::Workspaces => Ok(self.workspaces.selected().map(|w| format!("{}\nBranch: {}\nLocked: {}\nEnter open | N create | D remove", display_path(&w.path), w.branch, w.locked)).unwrap_or_else(|| "No workspace".into())),
+            ViewMode::PullRequests => match self.pull_requests.selected() {
                 Some(pr) => Ok(format!("{}\n{}", crate::github::detail(self.repository.root(), pr.number)?, crate::pr_review::comments(self.repository.root(), pr.number)?)),
                 None => Ok("No open pull requests. N creates a draft PR; authenticate with gh auth login outside the TUI.".into()),
             },

@@ -474,7 +474,7 @@ mod tests {
         let repo = crate::test_support::TestRepo::new();
         let mut app = crate::app::App::new(repo.open()).unwrap();
         app.view = crate::model::ViewMode::PullRequests;
-        app.pull_requests.push(PullRequest {
+        app.pull_requests.items.push(PullRequest {
             number: 7,
             title: "Title".into(),
             url: "url".into(),
@@ -541,7 +541,7 @@ mod tests {
         assert!(
             app.message_is_error
                 && app.pr_filter.state == "open"
-                && app.pull_requests[0].number == 7
+                && app.pull_requests.items[0].number == 7
         );
         assert!(mock.calls().is_empty());
     }
@@ -549,7 +549,7 @@ mod tests {
     #[test]
     fn selected_approval_pins_the_reviewed_commit_and_rejects_changed_head() {
         let (_repo, app) = selected_app();
-        let pr = app.pull_requests[0].clone();
+        let pr = app.pull_requests.items[0].clone();
         let json = serde_json::json!({"number":7,"title":"Title","url":"url","headRefName":"topic","baseRefName":"main","headRefOid":pr.head_ref_oid,"isDraft":true});
         let mock = Mock::new([json.to_string(), "approved".into()]);
         review_selected(Path::new("."), &pr, "--approve", "").unwrap();

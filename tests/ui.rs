@@ -216,7 +216,7 @@ fn pr_file_view_shows_two_line_numbers_and_inline_comment_target() {
         head_ref_oid: "a".repeat(40),
         is_draft: false,
     });
-    app.pr_files.push(PrFile {
+    app.pr_files.items.push(PrFile {
         filename: "file.rs".into(),
         sha: "blob".into(),
         status: "modified".into(),

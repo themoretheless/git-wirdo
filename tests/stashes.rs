@@ -83,7 +83,7 @@ fn successful_pop_removes_only_selected_entry_and_conflicting_pop_retains_it() {
     app.handle(Action::PopStash);
     submit(&mut app, "pop");
     assert!(app.message_is_error && app.running);
-    assert_eq!(app.stashes[0].sha, stash.sha);
+    assert_eq!(app.stashes.items[0].sha, stash.sha);
     assert!(!app.state.files.is_empty());
     // Reset only the isolated test repository after verifying conflict preservation.
     repo.git(&["reset", "--hard", "HEAD^"]);
@@ -110,7 +110,7 @@ fn stash_prompts_preserve_changes_until_submission_and_confirm_drop() {
     app.handle(Action::SaveStash);
     submit(&mut app, "named stash");
     assert!(
-        app.stashes.len() == 1 && !repo.path.join("untracked").exists(),
+        app.stashes.items.len() == 1 && !repo.path.join("untracked").exists(),
         "{}; {}",
         app.message,
         repo.git(&["status", "--porcelain"])
@@ -120,5 +120,5 @@ fn stash_prompts_preserve_changes_until_submission_and_confirm_drop() {
     assert_eq!(app.repository.stashes().unwrap().len(), 1);
     app.handle(Action::Remove);
     submit(&mut app, "drop");
-    assert!(app.stashes.is_empty());
+    assert!(app.stashes.items.is_empty());
 }
