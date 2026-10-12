@@ -566,6 +566,11 @@ impl Repository {
     }
 
     pub fn load_state(&self) -> Result<RepoState> {
+        self.load_state_with_history(20)
+    }
+
+    /// Snapshot status, branches and the first `history_limit` commits in one pass.
+    pub fn load_state_with_history(&self, history_limit: usize) -> Result<RepoState> {
         let files = parse_status(&git(
             &self.root,
             ["status", "--porcelain=v1", "-z", "--untracked-files=all"],
@@ -575,7 +580,7 @@ impl Repository {
             branch: self.current_branch()?,
             files,
             branches: self.branches()?,
-            commits: self.history(20)?,
+            commits: self.history(history_limit)?,
             merge_state,
         })
     }

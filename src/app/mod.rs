@@ -167,15 +167,15 @@ impl App {
 
     pub fn refresh(&mut self) -> Result<()> {
         // Keep the previous snapshot intact if reading the repository fails.
-        self.state = self.repository.load_state()?;
-        if self.history_limit > 20 {
-            self.state.commits = self.repository.history(self.history_limit)?;
-        }
+        self.state = self
+            .repository
+            .load_state_with_history(self.history_limit)?;
         self.tracking = self.load_tracking();
-        if self.upstream_comparison {
+        // One upstream diff serves both the comparison list and the Seen-mark check.
+        let upstream_files = if self.upstream_comparison {
             self.review_files = self.repository.upstream_files()?;
-        }
-        let upstream_files = if self.seen.keys().any(|(upstream, _)| *upstream) {
+            self.review_files.clone()
+        } else if self.seen.keys().any(|(upstream, _)| *upstream) {
             self.repository.upstream_files().unwrap_or_default()
         } else {
             Vec::new()
@@ -212,17 +212,25 @@ impl App {
             &mut self.conflict_selection,
             self.state.merge_state.conflicts.len(),
         );
-        self.load_extra()?;
+        self.load_view(true)?;
         self.refresh_detail();
         Ok(())
     }
 
     /// Load the list behind the current view, keeping its cursor inside the new bounds.
     pub(super) fn load_extra(&mut self) -> Result<()> {
+        self.load_view(false)
+    }
+
+    /// `state_is_fresh` skips data `refresh` has just read, so a refresh runs each
+    /// Git command once.
+    fn load_view(&mut self, state_is_fresh: bool) -> Result<()> {
         match self.view {
             ViewMode::Reflog => self.reflog = self.repository.reflog(self.reflog_limit)?,
             ViewMode::History => {
-                self.state.commits = self.repository.history(self.history_limit)?;
+                if !state_is_fresh {
+                    self.state.commits = self.repository.history(self.history_limit)?;
+                }
                 if self.graph_visible {
                     self.history_graph = self.repository.history_graph(self.history_limit)?;
                 }
