@@ -23,9 +23,10 @@ portable-pty = "0.9.0"
 [dev-dependencies]
 vt100 = "0.16.2"
 
-# Smaller, faster release binary. Panics must keep unwinding: terminal cleanup
+# Smaller, faster release binary. Symbol names are kept so panic backtraces stay
+# readable. Panics must keep unwinding: terminal cleanup
 # runs during unwinding, so `panic = "abort"` is deliberately not set.
 [profile.release]
 lto = "fat"
 codegen-units = 1
-strip = true
+strip = "debuginfo"
