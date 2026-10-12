@@ -2,6 +2,10 @@
 //! each means in the current view.
 use anyhow::Result;
 
+use super::prompts::{
+    BranchPrompt, GitHubPrompt, HistoryPrompt, RemotePrompt, RepositoryPrompt, StashPrompt,
+    TagPrompt, WorkingTreePrompt,
+};
 use super::{App, FileDetail, PromptKind, clamp_to};
 use crate::git::{ConflictSide, Repository};
 use crate::model::{ViewMode, display_path};
@@ -150,17 +154,17 @@ impl App {
                 self.start_prompt(PromptKind::CommandPalette, vec!["Command search"]);
             }
             Action::ImportPatch => self.start_prompt(
-                PromptKind::ImportPatch,
+                HistoryPrompt::ImportPatch,
                 vec!["Mail patch file", "Type apply to import commits"],
             ),
             Action::New if self.view == ViewMode::RecentRepositories => self
                 .start_prefilled_prompt(
-                    PromptKind::InitializeRepository,
+                    RepositoryPrompt::Initialize,
                     vec!["New repository path", "Initial branch"],
                     vec![String::new(), "main".into()],
                 ),
             Action::CommentPr if self.view == ViewMode::RecentRepositories => self.start_prompt(
-                PromptKind::CloneGitRepository,
+                RepositoryPrompt::CloneGit,
                 vec![
                     "Git URL or local source path",
                     "Clone destination (empty or new directory)",
@@ -201,7 +205,7 @@ impl App {
             }
             Action::SetUpstream if self.view == ViewMode::PullRequests => self
                 .start_prefilled_prompt(
-                    PromptKind::FilterPr,
+                    GitHubPrompt::Filter,
                     vec![
                         "PR state: open, closed, merged, all",
                         "GitHub search query (blank = none)",
@@ -218,7 +222,7 @@ impl App {
                         expected.base_ref_name.clone(),
                     ];
                     self.start_prefilled_prompt(
-                        PromptKind::EditPr(expected),
+                        GitHubPrompt::Edit(expected),
                         vec![
                             "PR title",
                             "PR body (Ctrl-U clears; Alt-Enter newline; paste supported)",
@@ -241,7 +245,7 @@ impl App {
                         pr.url
                     );
                     self.start_prompt(
-                        PromptKind::ReadyPr(pr),
+                        GitHubPrompt::Ready(pr),
                         vec!["Type selected PR number to confirm draft transition"],
                     );
                 }
@@ -266,7 +270,7 @@ impl App {
                         pr.head_ref_oid
                     );
                     self.start_prompt(
-                        PromptKind::InlinePr(pr.clone(), file.clone()),
+                        GitHubPrompt::InlineComment(pr.clone(), file.clone()),
                         vec![
                             "Diff side: LEFT or RIGHT",
                             "Displayed old/new line number",
@@ -296,7 +300,7 @@ impl App {
             Action::ExportCommit if self.view == ViewMode::History => {
                 if let Some(commit) = self.state.commits.get(self.history_selection) {
                     self.start_prompt(
-                        PromptKind::ExportCommit(commit.sha.clone()),
+                        HistoryPrompt::ExportCommit(commit.sha.clone()),
                         vec!["New mail patch destination (existing files refused)"],
                     );
                 }
@@ -323,7 +327,7 @@ impl App {
                 if let Some(entry) = self.reflog.selected() {
                     self.message = format!("Recover {}: {}", entry.sha, entry.subject);
                     self.start_prompt(
-                        PromptKind::RecoverCommit(entry.sha.clone()),
+                        HistoryPrompt::Recover(entry.sha.clone()),
                         vec!["New recovery branch name (checkout unchanged)"],
                     );
                 }
@@ -342,7 +346,7 @@ impl App {
                         request.target
                     );
                     self.start_prompt(
-                        PromptKind::ResetCommit(request),
+                        HistoryPrompt::Reset(request),
                         vec![
                             "Reset mode: soft, mixed, hard",
                             "Type full target commit ID to confirm",
@@ -370,7 +374,7 @@ impl App {
                         commit.subject
                     );
                     self.start_prompt(
-                        PromptKind::ApplyCommit(sha, revert),
+                        HistoryPrompt::Apply(sha, revert),
                         vec![
                             "Type full selected commit ID to confirm",
                             "Mainline parent for merge commit (blank otherwise)",
@@ -397,7 +401,7 @@ impl App {
                         }
                     );
                     self.start_prompt(
-                        PromptKind::RestoreFile(request),
+                        WorkingTreePrompt::Restore(request),
                         vec!["Type discard to confirm selected file"],
                     );
                 }
@@ -429,7 +433,7 @@ impl App {
             }
 
             Action::New if self.view == ViewMode::Tags => self.start_prompt(
-                PromptKind::CreateTag,
+                TagPrompt::Create,
                 vec![
                     "Tag name",
                     "Target commit (empty = HEAD)",
@@ -443,15 +447,15 @@ impl App {
                     self.message = format!("Selected tag: {} ({})", tag.name, tag.sha);
                     match action {
                         Action::Remove => self.start_prompt(
-                            PromptKind::DeleteTag(tag),
+                            TagPrompt::Delete(tag),
                             vec!["Type delete to remove local tag"],
                         ),
                         Action::PublishBranch => self.start_prompt(
-                            PromptKind::PublishTag(tag),
+                            TagPrompt::Publish(tag),
                             vec!["Remote to publish selected tag"],
                         ),
                         _ => self.start_prompt(
-                            PromptKind::DeleteRemoteTag(tag),
+                            TagPrompt::DeleteRemote(tag),
                             vec![
                                 "Remote to delete selected tag from",
                                 "Type delete to confirm remote deletion",
@@ -462,7 +466,7 @@ impl App {
             }
 
             Action::New if self.view == ViewMode::Remotes => {
-                self.start_prompt(PromptKind::AddRemote, vec!["Remote name", "Remote URL"])
+                self.start_prompt(RemotePrompt::Add, vec!["Remote name", "Remote URL"])
             }
             Action::EditRemote | Action::EditPushUrl | Action::Remove
                 if self.view == ViewMode::Remotes =>
@@ -471,40 +475,40 @@ impl App {
                     let name = remote.name.clone();
                     self.message = format!("Selected remote: {name}");
                     if action == Action::EditPushUrl {
-                        self.start_prompt(PromptKind::EditPushUrl(name), vec!["New push URL"]);
+                        self.start_prompt(RemotePrompt::EditPushUrl(name), vec!["New push URL"]);
                     } else if action == Action::EditRemote {
-                        self.start_prompt(PromptKind::EditRemote(name), vec!["New fetch URL"]);
+                        self.start_prompt(RemotePrompt::EditFetchUrl(name), vec!["New fetch URL"]);
                     } else {
                         self.start_prompt(
-                            PromptKind::RemoveRemote(name),
+                            RemotePrompt::Remove(name),
                             vec!["Type remove to remove remote and tracking refs"],
                         );
                     }
                 }
             }
             Action::SetUpstream => self.start_prompt(
-                PromptKind::SetUpstream,
+                RemotePrompt::SetUpstream,
                 vec!["Upstream ref (origin/main; empty unsets)"],
             ),
             Action::PublishBranch => self.start_prompt(
-                PromptKind::PublishBranch,
+                RemotePrompt::PublishBranch,
                 vec!["Remote to publish current branch"],
             ),
             Action::PullStrategy => self.start_prompt(
-                PromptKind::PullStrategy,
+                RemotePrompt::PullStrategy,
                 vec!["Pull strategy: ff-only, merge or rebase"],
             ),
             Action::SwitchBranch if self.view == ViewMode::RemoteBranches => {
                 if let Some(reference) = self.remote_branches.selected() {
                     self.start_prompt(
-                        PromptKind::CheckoutRemote(reference.clone()),
+                        RemotePrompt::CheckoutTracking(reference.clone()),
                         vec!["New local tracking branch name"],
                     );
                 }
             }
 
             Action::SaveStash => self.start_prompt(
-                PromptKind::SaveStash,
+                StashPrompt::Save,
                 vec!["Stash message (includes untracked files)"],
             ),
             Action::ApplyStash | Action::PopStash | Action::Remove
@@ -514,15 +518,15 @@ impl App {
                     self.message = format!("Selected {}: {}", stash.selector, stash.subject);
                     match action {
                         Action::ApplyStash => self.start_prompt(
-                            PromptKind::ApplyStash(stash, false),
+                            StashPrompt::Apply(stash, false),
                             vec!["Type apply to restore stash and index"],
                         ),
                         Action::PopStash => self.start_prompt(
-                            PromptKind::ApplyStash(stash, true),
+                            StashPrompt::Apply(stash, true),
                             vec!["Type pop to restore and remove on success"],
                         ),
                         _ => self.start_prompt(
-                            PromptKind::DropStash(stash),
+                            StashPrompt::Drop(stash),
                             vec!["Type drop to delete selected stash"],
                         ),
                     }
@@ -537,23 +541,23 @@ impl App {
             Action::SwitchBranch if self.view == ViewMode::GitHubRepositories => {
                 if let Some(repo) = self.github_repositories.selected() {
                     self.start_prompt(
-                        PromptKind::CloneRepository(repo.name_with_owner.clone()),
+                        RepositoryPrompt::CloneGitHub(repo.name_with_owner.clone()),
                         vec!["Clone destination (new directory)"],
                     );
                 }
             }
             Action::OpenRepository => {
-                self.start_prompt(PromptKind::OpenRepository, vec!["Repository path"])
+                self.start_prompt(RepositoryPrompt::Open, vec!["Repository path"])
             }
             Action::New if self.view == ViewMode::Workspaces => self.start_prompt(
-                PromptKind::Workspace,
+                RepositoryPrompt::CreateWorktree,
                 vec![
                     "Workspace path (relative to repo or absolute)",
                     "New branch name",
                 ],
             ),
             Action::New if self.view == ViewMode::PullRequests => self.start_prompt(
-                PromptKind::CreatePr,
+                GitHubPrompt::Create,
                 vec![
                     "Draft PR title",
                     "PR body",
@@ -564,7 +568,10 @@ impl App {
             Action::Remove if self.view == ViewMode::Workspaces => {
                 if let Some(w) = self.workspaces.selected().cloned() {
                     self.message = format!("Remove {}? Branch will remain.", display_path(&w.path));
-                    self.start_prompt(PromptKind::Remove(w), vec!["Type remove to confirm"]);
+                    self.start_prompt(
+                        RepositoryPrompt::RemoveWorktree(w),
+                        vec!["Type remove to confirm"],
+                    );
                 }
             }
             Action::MergePr | Action::ApprovePr | Action::RequestChanges | Action::CommentPr
@@ -574,21 +581,23 @@ impl App {
                     self.message = format!("Selected PR #{}: {} ({})", pr.number, pr.title, pr.url);
                     match action {
                         Action::MergePr => self.start_prompt(
-                            PromptKind::Merge(pr),
+                            GitHubPrompt::Merge(pr),
                             vec![
                                 "Confirm merge: enter PR number",
                                 "Merge method: merge, squash, rebase",
                             ],
                         ),
                         Action::ApprovePr => self.start_prompt(
-                            PromptKind::Review(pr, "--approve"),
+                            GitHubPrompt::Review(pr, "--approve"),
                             vec!["Approve review body"],
                         ),
                         Action::RequestChanges => self.start_prompt(
-                            PromptKind::Review(pr, "--request-changes"),
+                            GitHubPrompt::Review(pr, "--request-changes"),
                             vec!["Requested changes"],
                         ),
-                        _ => self.start_prompt(PromptKind::Comment(pr.number), vec!["PR comment"]),
+                        _ => {
+                            self.start_prompt(GitHubPrompt::Comment(pr.number), vec!["PR comment"])
+                        }
                     }
                 }
             }
@@ -702,15 +711,21 @@ impl App {
                     )?;
                 }
             }
-            Action::Commit => self.start_prompt(PromptKind::Commit(false), vec!["Commit message"]),
+            Action::Commit => {
+                self.start_prompt(WorkingTreePrompt::Commit(false), vec!["Commit message"])
+            }
             Action::AmendCommit => {
                 self.message =
                     "Amend rewrites the latest commit; enter its replacement message".into();
-                self.start_prompt(PromptKind::Commit(true), vec!["Amend commit message"]);
+                self.start_prompt(
+                    WorkingTreePrompt::Commit(true),
+                    vec!["Amend commit message"],
+                );
             }
-            Action::Branch => {
-                self.start_prompt(PromptKind::Branch, vec!["Create or switch branch"])
-            }
+            Action::Branch => self.start_prompt(
+                BranchPrompt::SwitchOrCreate,
+                vec!["Create or switch branch"],
+            ),
             Action::RenameBranch | Action::MergeBranch | Action::RebaseBranch | Action::Remove
                 if self.view == ViewMode::Branches =>
             {
@@ -718,18 +733,19 @@ impl App {
                     let name = branch.name.clone();
                     self.message = format!("Selected branch: {name}");
                     match action {
-                        Action::RenameBranch => self
-                            .start_prompt(PromptKind::RenameBranch(name), vec!["New branch name"]),
+                        Action::RenameBranch => {
+                            self.start_prompt(BranchPrompt::Rename(name), vec!["New branch name"])
+                        }
                         Action::MergeBranch => self.start_prompt(
-                            PromptKind::IntegrateBranch(name, false),
+                            BranchPrompt::Integrate(name, false),
                             vec!["Type merge to merge into the current branch"],
                         ),
                         Action::RebaseBranch => self.start_prompt(
-                            PromptKind::IntegrateBranch(name, true),
+                            BranchPrompt::Integrate(name, true),
                             vec!["Type rebase to rebase the current branch onto selection"],
                         ),
                         _ => self.start_prompt(
-                            PromptKind::DeleteBranch(name),
+                            BranchPrompt::Delete(name),
                             vec!["Type delete to remove a merged branch"],
                         ),
                     }

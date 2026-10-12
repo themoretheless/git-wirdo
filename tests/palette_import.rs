@@ -1,7 +1,7 @@
 mod support;
 use crossterm::event::{KeyCode, KeyEvent, KeyModifiers};
 use git_wirdo::{
-    app::{Action, App, PromptKind},
+    app::{Action, App, PromptKind, WorkingTreePrompt},
     commands,
     model::ViewMode,
 };
@@ -40,7 +40,7 @@ fn palette_filters_context_and_opens_existing_confirmed_forms_without_shortcut_e
     key(&mut app, KeyCode::Enter);
     assert!(matches!(
         app.prompt.as_ref().unwrap().kind,
-        PromptKind::Commit(false)
+        PromptKind::WorkingTree(WorkingTreePrompt::Commit(false))
     ));
     key(&mut app, KeyCode::Esc);
     app.handle(Action::CommandPalette);
@@ -49,7 +49,7 @@ fn palette_filters_context_and_opens_existing_confirmed_forms_without_shortcut_e
     key(&mut app, KeyCode::Enter);
     assert!(matches!(
         app.prompt.as_ref().unwrap().kind,
-        PromptKind::Commit(true)
+        PromptKind::WorkingTree(WorkingTreePrompt::Commit(true))
     ));
     key(&mut app, KeyCode::Esc);
     app.handle(Action::CommandPalette);

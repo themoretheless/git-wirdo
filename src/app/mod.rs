@@ -8,7 +8,10 @@ mod keys;
 mod prompts;
 
 pub use actions::Action;
-pub use prompts::{Prompt, PromptKind};
+pub use prompts::{
+    BranchPrompt, GitHubPrompt, HistoryPrompt, Prompt, PromptKind, RemotePrompt, RepositoryPrompt,
+    StashPrompt, TagPrompt, WorkingTreePrompt,
+};
 
 use std::collections::HashMap;
 use std::path::PathBuf;
