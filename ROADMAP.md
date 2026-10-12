@@ -38,7 +38,7 @@ Implemented foundations:
 - Prefilled/multiline PR editing, guarded draft/ready transitions, PR query/state
   filtering and incremental lists, selectable merge method, head-pinned reviews,
   paginated file/inline-comment inspection and validated inline comment publication.
-  Remote mutation requests are fixture-tested; no live review/comment was posted.
+  Remote mutation requests are fixture-tested; live acceptance is recorded below.
 
 - Persistent recent repository/worktree navigation and per-root views, history
   graph/size and PR filters; explicit resume and persistence opt-out. Atomic,
@@ -87,9 +87,17 @@ Acceptance evidence by capability:
 | GitHub repository/PR lifecycle, editing and inline review | GitHub transport/patch tests and strict offline CLI fixture | `terminal_github` |
 | Background serialization, cancellation and process cleanup | `background`, `windows_process` | `terminal_background`, `terminal_lifecycle`, `windows_terminal` |
 
-Known current limits remain documented in README. GitHub mutations are verified
-with an offline CLI fixture, not live review/comment publication. This is a Git
-client; Delta's agent threads, models and cloud collaboration are not implemented.
+Known current limits remain documented in README. Automated GitHub acceptance
+uses an offline CLI fixture. Separate live acceptance on 2026-10-11 through the
+actual library verified [PR #3](https://github.com/themoretheless/git-wirdo/pull/3):
+creation/listing, metadata edits, draft transitions, conversation/inline comments,
+a commit-pinned COMMENT review, checkout, stale metadata/head guards, and squash
+merge into a disposable base. Both disposable branches were removed. GitHub
+rejected author self-approval/request-changes; successful verdicts from another
+reviewer and other repositories' policies remain unverified. Server error JSON
+is preserved alongside CLI stderr, with a regression test for the observed 422.
+This is a Git client; Delta's agent threads, models and cloud collaboration are
+not implemented.
 
 ## Beyond the initial acceptance plan
 
