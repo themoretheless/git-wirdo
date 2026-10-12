@@ -1,7 +1,7 @@
 #![cfg(unix)]
 mod support;
 use std::{fs, path::Path};
-use support::{TempDirectory, TestRepo, terminal::TerminalFixture};
+use support::{TempDirectory, TestRepo, process_gone, terminal::TerminalFixture};
 fn binary() -> &'static Path {
     Path::new(env!("CARGO_BIN_EXE_git-wirdo"))
 }
@@ -130,11 +130,11 @@ fn blocked_clone(quit: bool) {
     };
     if quit {
         terminal.quit();
-        assert_eq!(unsafe { libc::kill(pid, 0) }, -1);
+        assert!(process_gone(pid), "clone helper {pid} still running");
         return;
     }
     terminal.key(b"\x1b", "Operation cancelled");
-    assert_eq!(unsafe { libc::kill(pid, 0) }, -1);
+    assert!(process_gone(pid), "clone helper {pid} still running");
     terminal.key(b"O", "Repository path:");
     terminal.field("repo", "Branch: main");
     terminal.quit();

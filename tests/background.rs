@@ -198,13 +198,7 @@ fn assert_descendant_stopped(r: &TestRepo) {
         .parse::<i32>()
         .unwrap();
     let deadline = Instant::now() + Duration::from_secs(3);
-    while unsafe { libc::kill(pid, 0) } == 0 {
-        // Linux may retain an orphan zombie briefly; it cannot execute or retain pipes.
-        if let Ok(status) = std::fs::read_to_string(format!("/proc/{pid}/stat"))
-            && status.split_whitespace().nth(2) == Some("Z")
-        {
-            return;
-        }
+    while !support::process_gone(pid) {
         assert!(Instant::now() < deadline, "hook descendant still alive");
         thread::sleep(Duration::from_millis(10));
     }

@@ -173,3 +173,15 @@ pub fn rebase_conflict() -> TestRepo {
     repo.fail(&["rebase", "main"]);
     repo
 }
+
+/// Whether `pid` can no longer run. A killed orphan stays a zombie until some ancestor
+/// reaps it, and container init processes often never do; a zombie cannot execute or
+/// hold pipes, so it counts as gone.
+#[cfg(unix)]
+pub fn process_gone(pid: i32) -> bool {
+    if unsafe { libc::kill(pid, 0) } != 0 {
+        return true;
+    }
+    std::fs::read_to_string(format!("/proc/{pid}/stat"))
+        .is_ok_and(|status| status.split_whitespace().nth(2) == Some("Z"))
+}
