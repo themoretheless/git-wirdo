@@ -103,16 +103,16 @@ fn app_opens_and_refreshes_through_an_injected_runner_without_git() {
     assert_eq!(repository.root(), Path::new("/fake/work"));
 
     let mut app = App::new(repository).unwrap();
-    assert_eq!(app.state.branch, "main");
-    assert!(app.state.files.is_empty());
+    assert_eq!(app.state().branch, "main");
+    assert!(app.state().files.is_empty());
     assert!(
         fake.ran("status"),
         "the snapshot reads status through the runner"
     );
 
     app.handle(Action::Refresh);
-    assert!(!app.message_is_error, "{}", app.message);
-    assert_eq!(app.message, "Refreshed");
+    assert!(!app.message_is_error(), "{}", app.message());
+    assert_eq!(app.message(), "Refreshed");
 }
 
 #[test]
@@ -124,13 +124,16 @@ fn git_failures_from_the_runner_become_recoverable_ui_errors() {
         App::new(Repository::open_with(Path::new("/fake/work"), fake.clone()).unwrap()).unwrap();
 
     app.handle(Action::Fetch);
-    assert!(app.message_is_error);
+    assert!(app.message_is_error());
     assert!(
-        app.message.contains("unable to access remote"),
+        app.message().contains("unable to access remote"),
         "{}",
-        app.message
+        app.message()
     );
-    assert!(app.running, "a failed Git command must not end the session");
+    assert!(
+        app.running(),
+        "a failed Git command must not end the session"
+    );
     assert!(fake.ran("fetch"));
 }
 

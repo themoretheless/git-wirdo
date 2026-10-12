@@ -36,7 +36,7 @@ fn recent_listing_and_explicit_resume_work_outside_a_repo_without_writing_state(
     repo.write("unsaved.txt", "retain");
     let path = repo.directory.0.join("state.json");
     let app = git_wirdo::app::App::new(repo.open()).unwrap();
-    git_wirdo::settings::save(&path, &app.navigation).unwrap();
+    git_wirdo::settings::save(&path, app.navigation()).unwrap();
     let bytes = std::fs::read(&path).unwrap();
     let output = binary()
         .current_dir(&repo.directory.0)
@@ -76,7 +76,7 @@ fn default_current_directory_and_headless_inspection_ignore_saved_navigation() {
     let path = other.directory.0.join("state.json");
     git_wirdo::settings::save(
         &path,
-        &git_wirdo::app::App::new(other.open()).unwrap().navigation,
+        git_wirdo::app::App::new(other.open()).unwrap().navigation(),
     )
     .unwrap();
     let output = binary()

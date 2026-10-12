@@ -56,16 +56,16 @@ fn blame_reads_head_authorship_and_tui_toggles_back_to_diff() {
     assert!(blame.contains("original line") && !blame.contains("pending edit"));
     let mut app = App::new(repo.open()).unwrap();
     app.handle(Action::FileHistory);
-    assert_eq!(app.file_detail, FileDetail::History);
-    assert!(app.detail_text.contains("original creation"));
+    assert_eq!(app.file_detail(), FileDetail::History);
+    assert!(app.detail_text().contains("original creation"));
     app.handle(Action::FileBlame);
     assert!(
-        app.detail_text.contains("Line authorship at HEAD")
-            && app.detail_text.contains("original line")
+        app.detail_text().contains("Line authorship at HEAD")
+            && app.detail_text().contains("original line")
     );
     app.handle(Action::FileBlame);
-    assert_eq!(app.file_detail, FileDetail::Diff);
-    assert!(app.detail_text.contains("pending edit"));
+    assert_eq!(app.file_detail(), FileDetail::Diff);
+    assert!(app.detail_text().contains("pending edit"));
 }
 
 #[test]
@@ -124,9 +124,9 @@ fn staged_rename_inspects_original_head_path_and_deleted_history_remains_readabl
     let mut app = App::new(repo.open()).unwrap();
     app.handle(Action::FileBlame);
     assert!(
-        app.detail_text.contains("original line"),
+        app.detail_text().contains("original line"),
         "{}",
-        app.detail_text
+        app.detail_text()
     );
     app.handle(Action::Unstage);
     assert_eq!(repo.git(&["diff", "--cached"]), index);

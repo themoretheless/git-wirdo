@@ -146,7 +146,7 @@ fn startup_recent_repository_opens_from_saved_state_without_initializing_current
     source.write("dirty", "retained");
     let state = source.directory.0.join("navigation.json");
     let app = git_wirdo::app::App::new(source.open()).unwrap();
-    git_wirdo::settings::save(&state, &app.navigation).unwrap();
+    git_wirdo::settings::save(&state, app.navigation()).unwrap();
     let mut terminal = TerminalFixture::spawn_saved_starting(binary(), &state, |command| {
         command.current_dir(&source.directory.0);
     });
@@ -173,7 +173,7 @@ fn long_recent_list_keeps_selected_path_and_operation_controls_visible() {
     source.write("last-entry-work", "retained");
     let state = source.directory.0.join("navigation.json");
     let app = git_wirdo::app::App::new(source.open()).unwrap();
-    let mut navigation = app.navigation.clone();
+    let mut navigation = app.navigation().clone();
     let mut actual = navigation.repositories[0].clone();
     actual.last_opened = 0;
     navigation.repositories = (1..=49)

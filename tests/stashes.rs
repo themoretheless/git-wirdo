@@ -78,13 +78,13 @@ fn successful_pop_removes_only_selected_entry_and_conflicting_pop_retains_it() {
     repo.write("file", "new base\n");
     repo.commit_all("changed base");
     let mut app = App::new(repository.clone()).unwrap();
-    app.view = ViewMode::Stashes;
+    app.set_view(ViewMode::Stashes);
     app.refresh().unwrap();
     app.handle(Action::PopStash);
     submit(&mut app, "pop");
-    assert!(app.message_is_error && app.running);
-    assert_eq!(app.stashes.items[0].sha, stash.sha);
-    assert!(!app.state.files.is_empty());
+    assert!(app.message_is_error() && app.running());
+    assert_eq!(app.stashes().items[0].sha, stash.sha);
+    assert!(!app.state().files.is_empty());
     // Reset only the isolated test repository after verifying conflict preservation.
     repo.git(&["reset", "--hard", "HEAD^"]);
     repository.apply_stash(&stash, true).unwrap();
@@ -102,7 +102,7 @@ fn stash_prompts_preserve_changes_until_submission_and_confirm_drop() {
     repo.commit_all("base");
     repo.write("untracked", "save me");
     let mut app = App::new(repo.open()).unwrap();
-    app.view = ViewMode::Stashes;
+    app.set_view(ViewMode::Stashes);
     app.refresh().unwrap();
     app.handle(Action::SaveStash);
     app.handle_key(KeyEvent::new(KeyCode::Esc, KeyModifiers::NONE));
@@ -110,15 +110,15 @@ fn stash_prompts_preserve_changes_until_submission_and_confirm_drop() {
     app.handle(Action::SaveStash);
     submit(&mut app, "named stash");
     assert!(
-        app.stashes.items.len() == 1 && !repo.path.join("untracked").exists(),
+        app.stashes().items.len() == 1 && !repo.path.join("untracked").exists(),
         "{}; {}",
-        app.message,
+        app.message(),
         repo.git(&["status", "--porcelain"])
     );
     app.handle(Action::Remove);
     submit(&mut app, "yes");
-    assert_eq!(app.repository.stashes().unwrap().len(), 1);
+    assert_eq!(app.repository().stashes().unwrap().len(), 1);
     app.handle(Action::Remove);
     submit(&mut app, "drop");
-    assert!(app.stashes.items.is_empty());
+    assert!(app.stashes().items.is_empty());
 }

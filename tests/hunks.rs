@@ -90,13 +90,13 @@ fn tui_selects_hunk_and_switches_between_index_and_working_diff() {
     repo.write("file", &lines("FIRST", "LAST"));
     let mut app = App::new(repo.open()).unwrap();
     app.handle(Action::OpenHunks);
-    assert_eq!(app.hunks.items.len(), 2);
+    assert_eq!(app.hunks().items.len(), 2);
     app.handle(Action::NextItem);
     app.handle(Action::Stage);
     assert!(repo.git(&["show", ":file"]).contains("LAST\n"));
     assert!(repo.git(&["show", ":file"]).contains("first\n"));
     app.handle(Action::ToggleComparison);
-    assert!(app.staged_hunks && app.hunks.items.len() == 1);
+    assert!(app.staged_hunks() && app.hunks().items.len() == 1);
     app.handle(Action::Unstage);
     assert!(repo.git(&["diff", "--cached"]).is_empty());
 }
@@ -123,10 +123,17 @@ fn upstream_review_never_stages_a_cached_hunk() {
     repo.write("file", "base\n");
     repo.commit_all("base");
     repo.write("file", "changed\n");
+    // A local branch is enough of an upstream for the merge-base comparison.
+    repo.git(&["branch", "base"]);
+    repo.git(&["branch", "--set-upstream-to=base"]);
     let mut app = App::new(repo.open()).unwrap();
     app.handle(Action::OpenHunks);
-    assert_eq!(app.hunks.items.len(), 1);
-    app.upstream_comparison = true;
+    assert_eq!(app.hunks().items.len(), 1);
+    app.set_view(git_wirdo::model::ViewMode::Files);
+    app.handle(Action::ToggleComparison);
+    assert!(app.upstream_comparison(), "{}", app.message());
+    app.handle(Action::OpenHunks);
+    assert!(app.hunks().items.is_empty() || app.view() != git_wirdo::model::ViewMode::Hunks);
     app.handle(Action::Stage);
     assert!(repo.git(&["diff", "--cached"]).is_empty());
 }

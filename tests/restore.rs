@@ -95,6 +95,9 @@ fn discard_prompt_can_be_cancelled_and_never_acts_in_upstream_view() {
     repo.write("file", "base");
     repo.commit_all("base");
     repo.write("file", "dirty");
+    // A local branch is enough of an upstream for the merge-base comparison.
+    repo.git(&["branch", "base"]);
+    repo.git(&["branch", "--set-upstream-to=base"]);
     let mut app = App::new(repo.open()).unwrap();
     app.handle(Action::Remove);
     app.handle_key(KeyEvent::new(KeyCode::Esc, KeyModifiers::NONE));
@@ -102,10 +105,12 @@ fn discard_prompt_can_be_cancelled_and_never_acts_in_upstream_view() {
         std::fs::read_to_string(repo.path.join("file")).unwrap(),
         "dirty"
     );
-    app.upstream_comparison = true;
+    app.handle(Action::ToggleComparison);
+    assert!(app.upstream_comparison(), "{}", app.message());
     app.handle(Action::Remove);
-    assert!(app.prompt.is_none());
-    app.upstream_comparison = false;
+    assert!(app.prompt().is_none());
+    app.handle(Action::ToggleComparison);
+    assert!(!app.upstream_comparison());
     app.handle(Action::RestoreFromIndex);
     for c in "discard".chars() {
         app.handle_key(KeyEvent::new(KeyCode::Char(c), KeyModifiers::NONE));

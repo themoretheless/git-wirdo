@@ -20,7 +20,7 @@ fn editable_commit_amend_and_branch_names_preserve_unstaged_changes() {
     let mut app = App::new(repo.open()).unwrap();
     app.handle(Action::Commit);
     submit(&mut app, "custom qsc message");
-    assert!(!app.message_is_error && app.running);
+    assert!(!app.message_is_error() && app.running());
     assert_eq!(
         repo.git(&["log", "-1", "--format=%s"]).trim(),
         "custom qsc message"
@@ -36,7 +36,7 @@ fn editable_commit_amend_and_branch_names_preserve_unstaged_changes() {
     assert_ne!(repo.git(&["rev-parse", "HEAD"]), before);
     app.handle(Action::Branch);
     submit(&mut app, "topic/custom");
-    assert_eq!(app.state.branch, "topic/custom");
+    assert_eq!(app.state().branch, "topic/custom");
     assert_eq!(
         std::fs::read_to_string(repo.path.join("untracked")).unwrap(),
         "keep"
@@ -80,18 +80,19 @@ fn starting_merge_refreshes_conflicts_and_abort_restores_branch() {
     repo.commit_all("main");
     let before = repo.git(&["rev-parse", "HEAD"]);
     let mut app = App::new(repo.open()).unwrap();
-    app.view = ViewMode::Branches;
-    app.branch_selection = app
-        .state
-        .branches
-        .iter()
-        .position(|b| b.name == "topic")
-        .unwrap();
+    app.set_view(ViewMode::Branches);
+    app.select(
+        app.state()
+            .branches
+            .iter()
+            .position(|b| b.name == "topic")
+            .unwrap(),
+    );
     app.handle(Action::MergeBranch);
     submit(&mut app, "merge");
-    assert!(app.message_is_error && app.state.merge_state.merge_in_progress);
-    assert_eq!(app.state.merge_state.conflicts.len(), 1);
-    app.view = ViewMode::Conflicts;
+    assert!(app.message_is_error() && app.state().merge_state.merge_in_progress);
+    assert_eq!(app.state().merge_state.conflicts.len(), 1);
+    app.set_view(ViewMode::Conflicts);
     app.handle(Action::Abort);
     assert_eq!(repo.git(&["rev-parse", "HEAD"]), before);
     assert_eq!(

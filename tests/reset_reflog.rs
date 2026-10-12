@@ -196,29 +196,36 @@ fn reset_conflict_and_unborn_states_are_refused() {
 fn tui_requires_mode_and_full_sha_then_recovers_without_destroying_current_work() {
     let (r, base, head) = fixture();
     let mut app = App::new(r.open()).unwrap();
-    app.view = ViewMode::History;
-    app.history_selection = app
-        .state
-        .commits
-        .iter()
-        .position(|c| c.sha == base)
-        .unwrap();
+    app.set_view(ViewMode::History);
+    app.select(
+        app.state()
+            .commits
+            .iter()
+            .position(|c| c.sha == base)
+            .unwrap(),
+    );
     app.handle(Action::ResetCommit);
     submit(&mut app, "hard");
     submit(&mut app, "wrong");
-    assert!(app.message_is_error);
+    assert!(app.message_is_error());
     assert_eq!(r.git(&["rev-parse", "HEAD"]).trim(), head);
     app.handle(Action::ResetCommit);
     submit(&mut app, "hard");
     submit(&mut app, &base);
-    assert!(!app.message_is_error, "{}", app.message);
-    assert!(app.message.contains("refs/git-wirdo/recovery"));
-    app.view = ViewMode::Reflog;
+    assert!(!app.message_is_error(), "{}", app.message());
+    assert!(app.message().contains("refs/git-wirdo/recovery"));
+    app.set_view(ViewMode::Reflog);
     app.refresh().unwrap();
-    app.reflog.selection = app.reflog.items.iter().position(|e| e.sha == head).unwrap();
+    app.select(
+        app.reflog()
+            .items
+            .iter()
+            .position(|e| e.sha == head)
+            .unwrap(),
+    );
     app.handle(Action::New);
     submit(&mut app, "saved");
-    assert!(!app.message_is_error, "{}", app.message);
+    assert!(!app.message_is_error(), "{}", app.message());
     assert_eq!(r.git(&["rev-parse", "saved"]).trim(), head);
     assert_eq!(r.git(&["rev-parse", "HEAD"]).trim(), base);
 }

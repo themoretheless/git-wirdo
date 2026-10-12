@@ -134,14 +134,14 @@ fn remote_removal_prompt_requires_confirmation() {
         .add_remote("origin", "https://example.invalid/repo.git")
         .unwrap();
     let mut app = App::new(repo.open()).unwrap();
-    app.view = ViewMode::Remotes;
+    app.set_view(ViewMode::Remotes);
     app.refresh().unwrap();
     app.handle(Action::Remove);
     for c in "yes".chars() {
         app.handle_key(KeyEvent::new(KeyCode::Char(c), KeyModifiers::NONE));
     }
     app.handle_key(KeyEvent::new(KeyCode::Enter, KeyModifiers::NONE));
-    assert!(app.message_is_error && app.remotes.items.len() == 1);
+    assert!(app.message_is_error() && app.remotes().items.len() == 1);
 }
 
 #[test]
@@ -156,7 +156,7 @@ fn missing_upstream_ref_is_visible_instead_of_silent_zero_counts() {
     repo.git(&["update-ref", "-d", "refs/remotes/origin/main"]);
     assert!(repository.tracking().is_err());
     let app = App::new(repository).unwrap();
-    assert!(app.tracking.error.is_some());
+    assert!(app.tracking().error.is_some());
 }
 
 #[test]
@@ -186,13 +186,13 @@ fn pull_merge_conflict_refreshes_state_and_can_be_aborted() {
     }
     app.handle_key(KeyEvent::new(KeyCode::Enter, KeyModifiers::NONE));
     assert!(
-        app.message_is_error
-            && app.state.merge_state.merge_in_progress
-            && app.state.merge_state.conflicts.len() == 1
+        app.message_is_error()
+            && app.state().merge_state.merge_in_progress
+            && app.state().merge_state.conflicts.len() == 1
     );
-    app.view = ViewMode::Conflicts;
+    app.set_view(ViewMode::Conflicts);
     app.handle(Action::Abort);
-    assert!(!app.message_is_error);
+    assert!(!app.message_is_error());
     assert_eq!(reader.git(&["rev-parse", "HEAD"]), before);
     assert_eq!(
         std::fs::read_to_string(reader.path.join("file")).unwrap(),

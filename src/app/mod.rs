@@ -2,10 +2,13 @@
 //!
 //! Key handling, actions, prompts and detail rendering live in the submodules; this file
 //! owns the state itself and the refresh cycle every mutation ends with.
+mod access;
 mod actions;
 mod detail;
 mod keys;
 mod prompts;
+#[cfg(test)]
+mod tests;
 
 pub use actions::Action;
 pub use prompts::{
@@ -23,50 +26,50 @@ use crate::model::{FileEntry, RepoState, ViewMode};
 
 #[derive(Debug, Clone)]
 pub struct App {
-    pub navigation: crate::settings::Navigation,
-    pub recent_selection: usize,
-    pub persistence_error: Option<String>,
-    pub repository: Repository,
-    pub state: RepoState,
-    pub view: ViewMode,
-    pub file_selection: usize,
-    pub history_selection: usize,
-    pub history_limit: usize,
-    pub graph_visible: bool,
-    pub history_graph: String,
-    pub reflog: Listed<crate::model::ReflogEntry>,
-    pub reflog_limit: usize,
-    pub branch_selection: usize,
-    pub conflict_selection: usize,
-    pub browse_tracked: bool,
-    pub tracked_files: Vec<FileEntry>,
-    pub file_detail: FileDetail,
-    pub detail_text: String,
-    pub message: String,
-    pub message_is_error: bool,
-    pub running: bool,
-    pub detail_scroll: u16,
-    pub detail_column: u16,
-    pub upstream_comparison: bool,
-    pub review_files: Vec<FileEntry>,
-    pub seen: HashMap<(bool, PathBuf), String>,
-    pub search: String,
-    pub searching: bool,
-    pub workspaces: Listed<crate::model::Workspace>,
-    pub pull_requests: Listed<crate::github::PullRequest>,
-    pub pr_filter: crate::github::PrFilter,
-    pub review_pr: Option<crate::github::PullRequest>,
-    pub pr_files: Listed<crate::pr_review::PrFile>,
-    pub prompt: Option<Prompt>,
-    pub palette_selection: usize,
-    pub github_repositories: Listed<crate::github::GitHubRepo>,
-    pub stashes: Listed<crate::model::StashEntry>,
-    pub remotes: Listed<crate::model::RemoteEntry>,
-    pub remote_branches: Listed<String>,
-    pub tracking: crate::model::Tracking,
-    pub tags: Listed<crate::model::TagEntry>,
-    pub hunks: Listed<crate::patch::Hunk>,
-    pub staged_hunks: bool,
+    pub(crate) navigation: crate::settings::Navigation,
+    pub(crate) recent_selection: usize,
+    pub(crate) persistence_error: Option<String>,
+    pub(crate) repository: Repository,
+    pub(crate) state: RepoState,
+    pub(crate) view: ViewMode,
+    pub(crate) file_selection: usize,
+    pub(crate) history_selection: usize,
+    pub(crate) history_limit: usize,
+    pub(crate) graph_visible: bool,
+    pub(crate) history_graph: String,
+    pub(crate) reflog: Listed<crate::model::ReflogEntry>,
+    pub(crate) reflog_limit: usize,
+    pub(crate) branch_selection: usize,
+    pub(crate) conflict_selection: usize,
+    pub(crate) browse_tracked: bool,
+    pub(crate) tracked_files: Vec<FileEntry>,
+    pub(crate) file_detail: FileDetail,
+    pub(crate) detail_text: String,
+    pub(crate) message: String,
+    pub(crate) message_is_error: bool,
+    pub(crate) running: bool,
+    pub(crate) detail_scroll: u16,
+    pub(crate) detail_column: u16,
+    pub(crate) upstream_comparison: bool,
+    pub(crate) review_files: Vec<FileEntry>,
+    pub(crate) seen: HashMap<(bool, PathBuf), String>,
+    pub(crate) search: String,
+    pub(crate) searching: bool,
+    pub(crate) workspaces: Listed<crate::model::Workspace>,
+    pub(crate) pull_requests: Listed<crate::github::PullRequest>,
+    pub(crate) pr_filter: crate::github::PrFilter,
+    pub(crate) review_pr: Option<crate::github::PullRequest>,
+    pub(crate) pr_files: Listed<crate::pr_review::PrFile>,
+    pub(crate) prompt: Option<Prompt>,
+    pub(crate) palette_selection: usize,
+    pub(crate) github_repositories: Listed<crate::github::GitHubRepo>,
+    pub(crate) stashes: Listed<crate::model::StashEntry>,
+    pub(crate) remotes: Listed<crate::model::RemoteEntry>,
+    pub(crate) remote_branches: Listed<String>,
+    pub(crate) tracking: crate::model::Tracking,
+    pub(crate) tags: Listed<crate::model::TagEntry>,
+    pub(crate) hunks: Listed<crate::patch::Hunk>,
+    pub(crate) staged_hunks: bool,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]

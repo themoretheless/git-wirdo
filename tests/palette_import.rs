@@ -36,10 +36,10 @@ fn palette_filters_context_and_opens_existing_confirmed_forms_without_shortcut_e
     let mut app = App::new(repo.open()).unwrap();
     app.handle(Action::CommandPalette);
     app.handle_paste("COMMIT staged");
-    assert_eq!(commands::filtered(app.view, "COMMIT staged").len(), 1);
+    assert_eq!(commands::filtered(app.view(), "COMMIT staged").len(), 1);
     key(&mut app, KeyCode::Enter);
     assert!(matches!(
-        app.prompt.as_ref().unwrap().kind,
+        app.prompt().as_ref().unwrap().kind,
         PromptKind::WorkingTree(WorkingTreePrompt::Commit(false))
     ));
     key(&mut app, KeyCode::Esc);
@@ -48,22 +48,22 @@ fn palette_filters_context_and_opens_existing_confirmed_forms_without_shortcut_e
     key(&mut app, KeyCode::Down);
     key(&mut app, KeyCode::Enter);
     assert!(matches!(
-        app.prompt.as_ref().unwrap().kind,
+        app.prompt().as_ref().unwrap().kind,
         PromptKind::WorkingTree(WorkingTreePrompt::Commit(true))
     ));
     key(&mut app, KeyCode::Esc);
     app.handle(Action::CommandPalette);
     field(&mut app, "view commit history");
-    assert_eq!(app.view, ViewMode::History);
+    assert_eq!(app.view(), ViewMode::History);
     assert!(
-        commands::filtered(app.view, "export")
+        commands::filtered(app.view(), "export")
             .iter()
             .any(|e| e.action == Action::ExportCommit)
     );
     assert!(commands::filtered(ViewMode::Files, "export").is_empty());
     app.handle(Action::CommandPalette);
     field(&mut app, "qPcs $(echo untouched)");
-    assert!(app.running && app.message_is_error);
+    assert!(app.running() && app.message_is_error());
     assert!(repo.git(&["status", "--porcelain"]).is_empty());
     assert!(
         commands::filtered(ViewMode::PullRequests, "upstream")
@@ -158,7 +158,7 @@ fn cli_import_preserves_authorship_and_dirty_refusal_does_not_touch_files_or_ref
     app.handle(Action::ImportPatch);
     field(&mut app, path.to_str().unwrap());
     field(&mut app, "no");
-    assert!(app.message_is_error);
+    assert!(app.message_is_error());
     assert_eq!(target.git(&["rev-parse", "HEAD"]), head);
 }
 
@@ -241,13 +241,13 @@ fn palette_hunk_navigation_does_not_stage_a_different_file_from_the_tracked_brow
     let mut app = App::new(repo.open()).unwrap();
     app.handle(Action::BrowseTracked);
     assert_eq!(
-        app.displayed_files()[app.file_selection].path,
+        app.displayed_files()[app.file_selection()].path,
         std::path::Path::new("aaa-clean")
     );
     app.handle(Action::CommandPalette);
     field(&mut app, "view hunks");
-    assert_eq!(app.view, ViewMode::Hunks);
-    assert!(app.hunks.items.is_empty());
+    assert_eq!(app.view(), ViewMode::Hunks);
+    assert!(app.hunks().items.is_empty());
     app.handle(Action::Stage);
     assert!(repo.git(&["diff", "--cached"]).is_empty());
 }
