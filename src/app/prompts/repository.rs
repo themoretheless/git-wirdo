@@ -23,15 +23,19 @@ impl RepositoryPrompt {
     pub(super) fn submit(self, app: &mut App, v: &[String]) -> Result<Submitted> {
         let opened = match self {
             Self::Open => app.repository.resolve(Path::new(&v[0])),
-            Self::Initialize => {
-                Repository::initialize(app.repository.root(), Path::new(&v[0]), &v[1])?
-                    .root()
-                    .to_owned()
-            }
-            Self::CloneGit => Repository::clone_into(
+            Self::Initialize => Repository::initialize_with(
+                app.repository.root(),
+                Path::new(&v[0]),
+                &v[1],
+                app.repository.runner(),
+            )?
+            .root()
+            .to_owned(),
+            Self::CloneGit => Repository::clone_into_with(
                 app.repository.root(),
                 std::ffi::OsStr::new(&v[0]),
                 Path::new(&v[1]),
+                app.repository.runner(),
             )?
             .root()
             .to_owned(),

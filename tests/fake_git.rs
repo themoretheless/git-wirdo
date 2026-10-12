@@ -133,3 +133,44 @@ fn git_failures_from_the_runner_become_recoverable_ui_errors() {
     assert!(app.running, "a failed Git command must not end the session");
     assert!(fake.ran("fetch"));
 }
+
+#[test]
+fn initialization_and_cloning_run_git_through_the_injected_runner() {
+    let base = std::env::temp_dir();
+    let answers = || {
+        vec![
+            (
+                &["rev-parse", "--absolute-git-dir"][..],
+                Err("fatal: not a git repository"),
+            ),
+            (&["init"][..], Err("fatal: simulated init failure")),
+            (&["clone"][..], Err("fatal: simulated clone failure")),
+        ]
+    };
+
+    let fake = FakeGit::answering(answers());
+    let destination = Path::new("git-wirdo-fake-init-never-created");
+    let error = Repository::initialize_with(&base, destination, "main", fake.clone()).unwrap_err();
+    assert!(
+        format!("{error:#}").contains("simulated init failure"),
+        "{error:#}"
+    );
+    assert!(fake.ran("check-ref-format") && fake.ran("init"));
+    assert!(!base.join(destination).exists(), "no real Git ran");
+
+    let fake = FakeGit::answering(answers());
+    let destination = Path::new("git-wirdo-fake-clone-never-created");
+    let error = Repository::clone_into_with(
+        &base,
+        std::ffi::OsStr::new("https://example.invalid/repo.git"),
+        destination,
+        fake.clone(),
+    )
+    .unwrap_err();
+    assert!(
+        format!("{error:#}").contains("simulated clone failure"),
+        "{error:#}"
+    );
+    assert!(fake.ran("clone"));
+    assert!(!base.join(destination).exists(), "no real Git ran");
+}

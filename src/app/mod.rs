@@ -372,7 +372,7 @@ impl App {
 
     pub(super) fn open_repository(&mut self, path: &std::path::Path) -> Result<()> {
         // Construct first: a failed open leaves the existing repository intact.
-        let mut replacement = Self::new(Repository::open(path)?)?;
+        let mut replacement = Self::new(Repository::open_with(path, self.repository.runner())?)?;
         let mut navigation = self.navigation.clone();
         navigation.remember(self, false);
         navigation.restore(&mut replacement);

@@ -119,14 +119,25 @@ mod worktrees;
 impl Repository {
     /// Create a working tree explicitly, without reinitializing existing Git metadata.
     pub fn initialize(base: &Path, destination: &Path, branch: &str) -> Result<Self> {
-        git(base, ["check-ref-format", "--branch", branch])?;
-        let destination = lifecycle_destination(base, destination)?;
+        Self::initialize_with(base, destination, branch, Arc::new(ProcessRunner))
+    }
+
+    /// [`Repository::initialize`] with every Git command, including discovery, run by `runner`.
+    pub fn initialize_with(
+        base: &Path,
+        destination: &Path,
+        branch: &str,
+        runner: Arc<dyn GitRunner>,
+    ) -> Result<Self> {
+        run_in(&*runner, base, ["check-ref-format", "--branch", branch])?;
+        let destination = lifecycle_destination(&*runner, base, destination)?;
         match fs::symlink_metadata(destination.join(".git")) {
             Ok(_) => bail!("Destination already contains Git metadata"),
             Err(error) if error.kind() == std::io::ErrorKind::NotFound => {}
             Err(error) => return Err(error.into()),
         }
-        git(
+        run_in(
+            &*runner,
             base,
             [
                 OsStr::new("init"),
@@ -142,20 +153,31 @@ impl Repository {
                 display_path(&destination)
             )
         })?;
-        Self::open(&destination)
+        Self::open_with(&destination, runner)
     }
 
     /// Clone any Git URL or local repository. Never remove a partial destination on failure.
     pub fn clone_into(base: &Path, source: &OsStr, destination: &Path) -> Result<Self> {
+        Self::clone_into_with(base, source, destination, Arc::new(ProcessRunner))
+    }
+
+    /// [`Repository::clone_into`] with every Git command, including discovery, run by `runner`.
+    pub fn clone_into_with(
+        base: &Path,
+        source: &OsStr,
+        destination: &Path,
+        runner: Arc<dyn GitRunner>,
+    ) -> Result<Self> {
         ensure!(!source.is_empty(), "Clone source is required");
-        let destination = lifecycle_destination(base, destination)?;
+        let destination = lifecycle_destination(&*runner, base, destination)?;
         if destination.exists() {
             ensure!(
                 fs::read_dir(&destination)?.next().is_none(),
                 "Clone destination must be empty"
             );
         }
-        git(
+        run_in(
+            &*runner,
             base,
             [
                 OsStr::new("clone"),
@@ -171,7 +193,7 @@ impl Repository {
                 display_path(&destination)
             )
         })?;
-        Self::open(&destination)
+        Self::open_with(&destination, runner)
     }
 
     /// Resolve the working tree once, so all status paths and subsequent commands share a base.
@@ -181,22 +203,28 @@ impl Repository {
 
     /// Open a working tree whose Git commands, including discovery, run through `runner`.
     pub fn open_with(path: &Path, runner: Arc<dyn GitRunner>) -> Result<Self> {
-        let run = |path: &Path, args: &[&str]| {
-            checked(runner.output(&mut git_command(path, args), None)?)
-        };
-        let inside = run(path, &["rev-parse", "--is-inside-work-tree"])
+        let inside = run_in(&*runner, path, ["rev-parse", "--is-inside-work-tree"])
             .with_context(|| format!("Cannot open repository at {}", display_path(path)))?;
         ensure!(
             String::from_utf8_lossy(&inside).trim() == "true",
             "Git Wirdo requires a non-bare working tree"
         );
-        let root = output_path(&run(path, &["rev-parse", "--show-toplevel"])?)?;
-        let git_dir = output_path(&run(&root, &["rev-parse", "--absolute-git-dir"])?)?;
+        let root = output_path(&run_in(&*runner, path, ["rev-parse", "--show-toplevel"])?)?;
+        let git_dir = output_path(&run_in(
+            &*runner,
+            &root,
+            ["rev-parse", "--absolute-git-dir"],
+        )?)?;
         Ok(Self {
             root,
             git_dir,
             runner,
         })
+    }
+
+    /// The runner this repository's Git commands use; repositories opened from it share it.
+    pub fn runner(&self) -> Arc<dyn GitRunner> {
+        self.runner.clone()
     }
 
     /// Run Git in this working tree and return stdout, failing on a non-zero exit.
@@ -325,15 +353,6 @@ where
     command
 }
 
-fn git_output<I, S>(path: &Path, args: I) -> Result<Output>
-where
-    I: IntoIterator<Item = S>,
-    S: AsRef<OsStr>,
-{
-    crate::process::output(&mut git_command(path, args))
-        .with_context(|| format!("Failed to execute Git in {}", display_path(path)))
-}
-
 fn checked(output: Output) -> Result<Vec<u8>> {
     if !output.status.success() {
         let stderr = String::from_utf8_lossy(&output.stderr);
@@ -356,12 +375,17 @@ fn checked(output: Output) -> Result<Vec<u8>> {
     Ok(output.stdout)
 }
 
-fn git<I, S>(path: &Path, args: I) -> Result<Vec<u8>>
+/// Run Git in `path` through `runner`, failing on a non-zero exit. Used before a
+/// `Repository` exists; afterwards its own methods carry the runner.
+fn run_in<I, S>(runner: &dyn GitRunner, path: &Path, args: I) -> Result<Vec<u8>>
 where
     I: IntoIterator<Item = S>,
     S: AsRef<OsStr>,
 {
-    checked(git_output(path, args)?)
+    let output = runner
+        .output(&mut git_command(path, args), None)
+        .with_context(|| format!("Failed to execute Git in {}", display_path(path)))?;
+    checked(output)
 }
 
 fn utf8_line(bytes: &[u8]) -> Result<String> {
@@ -440,7 +464,7 @@ pub fn resolve_against(base: &Path, path: &Path) -> PathBuf {
     }
 }
 
-fn lifecycle_destination(base: &Path, path: &Path) -> Result<PathBuf> {
+fn lifecycle_destination(runner: &dyn GitRunner, base: &Path, path: &Path) -> Result<PathBuf> {
     ensure!(!path.as_os_str().is_empty(), "Destination is required");
     let destination = if path.is_absolute() {
         path.to_owned()
@@ -470,7 +494,7 @@ fn lifecycle_destination(base: &Path, path: &Path) -> Result<PathBuf> {
     ensure!(ancestor.is_dir(), "Destination parent must be a directory");
     let canonical = fs::canonicalize(ancestor)?;
     // rev-parse works inside metadata and bare repositories too; opening a working tree doesn't.
-    if let Ok(output) = git(ancestor, ["rev-parse", "--absolute-git-dir"]) {
+    if let Ok(output) = run_in(runner, ancestor, ["rev-parse", "--absolute-git-dir"]) {
         let metadata = fs::canonicalize(output_path(&output)?)?;
         ensure!(
             !canonical.starts_with(&metadata),
