@@ -3,6 +3,7 @@ use std::fs;
 use std::io::Read;
 use std::path::{Path, PathBuf};
 use std::process::{Command, Output, Stdio};
+use std::sync::Arc;
 
 use anyhow::{Context, Result, bail, ensure};
 
@@ -14,6 +15,26 @@ const PREVIEW_LIMIT: usize = 256 * 1024;
 pub struct Repository {
     root: PathBuf,
     git_dir: PathBuf,
+    runner: Arc<dyn GitRunner>,
+}
+
+/// Executes a fully prepared Git command and captures its output.
+///
+/// Every Git invocation of a `Repository` goes through its runner. The default,
+/// [`ProcessRunner`], spawns the process under the background task's cancellation
+/// control; tests can substitute canned output to drive the client without Git.
+pub trait GitRunner: Send + Sync + std::fmt::Debug {
+    fn output(&self, command: &mut Command, input: Option<&[u8]>) -> Result<Output>;
+}
+
+/// Runs Git as a cancellable child process.
+#[derive(Debug, Default, Clone, Copy)]
+pub struct ProcessRunner;
+
+impl GitRunner for ProcessRunner {
+    fn output(&self, command: &mut Command, input: Option<&[u8]>) -> Result<Output> {
+        crate::process::output_with_input(command, input)
+    }
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -155,15 +176,55 @@ impl Repository {
 
     /// Resolve the working tree once, so all status paths and subsequent commands share a base.
     pub fn open(path: &Path) -> Result<Self> {
-        let inside = git(path, ["rev-parse", "--is-inside-work-tree"])
+        Self::open_with(path, Arc::new(ProcessRunner))
+    }
+
+    /// Open a working tree whose Git commands, including discovery, run through `runner`.
+    pub fn open_with(path: &Path, runner: Arc<dyn GitRunner>) -> Result<Self> {
+        let run = |path: &Path, args: &[&str]| {
+            checked(runner.output(&mut git_command(path, args), None)?)
+        };
+        let inside = run(path, &["rev-parse", "--is-inside-work-tree"])
             .with_context(|| format!("Cannot open repository at {}", display_path(path)))?;
         ensure!(
             String::from_utf8_lossy(&inside).trim() == "true",
             "Git Wirdo requires a non-bare working tree"
         );
-        let root = output_path(&git(path, ["rev-parse", "--show-toplevel"])?)?;
-        let git_dir = output_path(&git(&root, ["rev-parse", "--absolute-git-dir"])?)?;
-        Ok(Self { root, git_dir })
+        let root = output_path(&run(path, &["rev-parse", "--show-toplevel"])?)?;
+        let git_dir = output_path(&run(&root, &["rev-parse", "--absolute-git-dir"])?)?;
+        Ok(Self {
+            root,
+            git_dir,
+            runner,
+        })
+    }
+
+    /// Run Git in this working tree and return stdout, failing on a non-zero exit.
+    fn git<I, S>(&self, args: I) -> Result<Vec<u8>>
+    where
+        I: IntoIterator<Item = S>,
+        S: AsRef<OsStr>,
+    {
+        checked(self.git_output(args)?)
+    }
+
+    /// Run Git in this working tree and return its raw output, whatever the exit status.
+    fn git_output<I, S>(&self, args: I) -> Result<Output>
+    where
+        I: IntoIterator<Item = S>,
+        S: AsRef<OsStr>,
+    {
+        self.git_with_input(args, None)
+    }
+
+    fn git_with_input<I, S>(&self, args: I, input: Option<&[u8]>) -> Result<Output>
+    where
+        I: IntoIterator<Item = S>,
+        S: AsRef<OsStr>,
+    {
+        self.runner
+            .output(&mut git_command(&self.root, args), input)
+            .with_context(|| format!("Failed to execute Git in {}", display_path(&self.root)))
     }
 
     pub fn root(&self) -> &Path {
@@ -189,7 +250,7 @@ impl Repository {
     }
 
     pub(super) fn text(&self, args: &[&str]) -> Result<String> {
-        Ok(String::from_utf8_lossy(&git(&self.root, args)?).into_owned())
+        Ok(String::from_utf8_lossy(&self.git(args)?).into_owned())
     }
 
     pub(super) fn run_paths(&self, args: &[&str], paths: &[&Path]) -> Result<Vec<u8>> {
@@ -198,7 +259,7 @@ impl Repository {
             .chain(std::iter::once(OsString::from("--")))
             .chain(paths.iter().map(|path| path.as_os_str().to_owned()))
             .collect();
-        git(&self.root, args)
+        self.git(args)
     }
 
     pub(super) fn path_text(&self, args: &[&str], paths: &[&Path]) -> Result<String> {

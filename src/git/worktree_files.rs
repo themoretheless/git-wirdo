@@ -8,10 +8,12 @@ impl Repository {
 
     /// Snapshot status, branches and the first `history_limit` commits in one pass.
     pub fn load_state_with_history(&self, history_limit: usize) -> Result<RepoState> {
-        let files = parse_status(&git(
-            &self.root,
-            ["status", "--porcelain=v1", "-z", "--untracked-files=all"],
-        )?)?;
+        let files = parse_status(&self.git([
+            "status",
+            "--porcelain=v1",
+            "-z",
+            "--untracked-files=all",
+        ])?)?;
         let merge_state = self.merge_state(&files)?;
         Ok(RepoState {
             branch: self.current_branch()?,
@@ -165,11 +167,7 @@ impl Repository {
             args.push("--reverse");
         }
         args.push("-");
-        let mut command = git_command(&self.root, &args);
-        checked(crate::process::output_with_input(
-            &mut command,
-            Some(&hunk.patch),
-        )?)?;
+        checked(self.git_with_input(&args, Some(&hunk.patch))?)?;
         Ok(())
     }
 
@@ -209,10 +207,7 @@ impl Repository {
     /// Compare the working tree to the merge base with its configured upstream.
     pub fn upstream_files(&self) -> Result<Vec<FileEntry>> {
         let base = self.upstream_base()?;
-        let bytes = git(
-            &self.root,
-            ["diff", "--name-status", "--no-renames", "-z", &base, "--"],
-        )?;
+        let bytes = self.git(["diff", "--name-status", "--no-renames", "-z", &base, "--"])?;
         let mut records = bytes.split(|byte| *byte == 0);
         let mut files = Vec::new();
         while let Some(status) = records.next().filter(|status| !status.is_empty()) {
@@ -289,7 +284,7 @@ impl Repository {
     }
 
     pub fn tracked_files(&self) -> Result<Vec<FileEntry>> {
-        let bytes = git(&self.root, ["ls-files", "--cached", "-z"])?;
+        let bytes = self.git(["ls-files", "--cached", "-z"])?;
         let mut paths = bytes
             .split(|b| *b == 0)
             .filter(|p| !p.is_empty())

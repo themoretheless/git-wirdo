@@ -25,21 +25,18 @@ impl Repository {
         if !self.has_head()? {
             return Ok(Vec::new());
         }
-        let bytes = git(
-            &self.root,
-            [
-                "log",
-                "--no-color",
-                "--no-show-signature",
-                "-z",
-                "-n",
-                &limit,
-                "--all",
-                "--topo-order",
-                "--date=short",
-                "--format=%H%x00%h%x00%ad%x00%an%x00%s",
-            ],
-        )?;
+        let bytes = self.git([
+            "log",
+            "--no-color",
+            "--no-show-signature",
+            "-z",
+            "-n",
+            &limit,
+            "--all",
+            "--topo-order",
+            "--date=short",
+            "--format=%H%x00%h%x00%ad%x00%an%x00%s",
+        ])?;
         let text = String::from_utf8_lossy(&bytes);
         let fields: Vec<_> = text.split_terminator('\0').collect();
         let (records, remainder) = fields.as_chunks::<5>();
@@ -70,16 +67,13 @@ impl Repository {
                 .is_file(),
             "Patch input must be a regular file"
         );
-        git(
-            &self.root,
-            [
-                OsStr::new("am"),
-                OsStr::new("--3way"),
-                OsStr::new("--no-rerere-autoupdate"),
-                OsStr::new("--"),
-                path.as_os_str(),
-            ],
-        )?;
+        self.git([
+            OsStr::new("am"),
+            OsStr::new("--3way"),
+            OsStr::new("--no-rerere-autoupdate"),
+            OsStr::new("--"),
+            path.as_os_str(),
+        ])?;
         Ok(())
     }
 
@@ -98,25 +92,22 @@ impl Repository {
             parents.split_whitespace().count() <= 2,
             "Merge commits cannot be exported as a single mail patch; select an ordinary commit"
         );
-        let bytes = git(
-            &self.root,
-            [
-                "format-patch",
-                "--stdout",
-                "--root",
-                "--no-signature",
-                "--no-numbered",
-                "--no-cover-letter",
-                "--no-notes",
-                "--no-ext-diff",
-                "--no-textconv",
-                "--binary",
-                "--full-index",
-                "-1",
-                sha,
-                "--",
-            ],
-        )?;
+        let bytes = self.git([
+            "format-patch",
+            "--stdout",
+            "--root",
+            "--no-signature",
+            "--no-numbered",
+            "--no-cover-letter",
+            "--no-notes",
+            "--no-ext-diff",
+            "--no-textconv",
+            "--binary",
+            "--full-index",
+            "-1",
+            sha,
+            "--",
+        ])?;
         ensure!(!bytes.is_empty(), "Git did not produce a mail patch");
         ensure!(
             !destination.as_os_str().is_empty(),
@@ -208,13 +199,13 @@ impl Repository {
 
     pub fn commit(&self, message: &str) -> Result<()> {
         ensure!(!message.trim().is_empty(), "Commit message cannot be empty");
-        git(&self.root, ["commit", "-m", message])?;
+        self.git(["commit", "-m", message])?;
         Ok(())
     }
 
     pub fn amend(&self, message: &str) -> Result<()> {
         ensure!(!message.trim().is_empty(), "Commit message cannot be empty");
-        git(&self.root, ["commit", "--amend", "-m", message])?;
+        self.git(["commit", "--amend", "-m", message])?;
         Ok(())
     }
 
@@ -235,21 +226,18 @@ impl Repository {
 
     pub fn reflog(&self, limit: usize) -> Result<Vec<crate::model::ReflogEntry>> {
         let bytes = if self.has_head()? {
-            git(
-                &self.root,
-                [
-                    "reflog",
-                    "show",
-                    "--no-color",
-                    "--no-show-signature",
-                    "-z",
-                    "-n",
-                    &limit.to_string(),
-                    "--format=%H%x00%gD%x00%gs",
-                    "HEAD",
-                    "--",
-                ],
-            )?
+            self.git([
+                "reflog",
+                "show",
+                "--no-color",
+                "--no-show-signature",
+                "-z",
+                "-n",
+                &limit.to_string(),
+                "--format=%H%x00%gD%x00%gs",
+                "HEAD",
+                "--",
+            ])?
         } else {
             Vec::new()
         };
@@ -294,8 +282,8 @@ impl Repository {
             !branch.trim().is_empty(),
             "Enter a new recovery branch name"
         );
-        git(&self.root, ["check-ref-format", "--branch", branch])?;
-        git(&self.root, ["branch", "--", branch, sha])?;
+        self.git(["check-ref-format", "--branch", branch])?;
+        self.git(["branch", "--", branch, sha])?;
         Ok(())
     }
 
@@ -306,12 +294,12 @@ impl Repository {
             "Finish the current Git operation first"
         );
         ensure!(self.has_head()?, "HEAD does not exist");
-        let head_ref = git_output(&self.root, ["symbolic-ref", "--quiet", "HEAD"])?;
+        let head_ref = self.git_output(["symbolic-ref", "--quiet", "HEAD"])?;
         ensure!(
             head_ref.status.success() || head_ref.status.code() == Some(1),
             "Cannot inspect HEAD reference"
         );
-        let flags = git(&self.root, ["ls-files", "-v", "-z"])?;
+        let flags = self.git(["ls-files", "-v", "-z"])?;
         let mut tracked = state
             .files
             .into_iter()
@@ -342,11 +330,8 @@ impl Repository {
         Ok(ResetSnapshot {
             head: self.text(&["rev-parse", "HEAD"])?.trim().into(),
             head_ref: head_ref.stdout,
-            status: git(
-                &self.root,
-                ["status", "--porcelain=v1", "-z", "--untracked-files=all"],
-            )?,
-            index: git(&self.root, ["ls-files", "--stage", "-z"])?,
+            status: self.git(["status", "--porcelain=v1", "-z", "--untracked-files=all"])?,
+            index: self.git(["ls-files", "--stage", "-z"])?,
             flags,
             files,
         })
@@ -367,12 +352,9 @@ impl Repository {
         );
         self.verify_commit_id(&request.target)?;
         if mode == ResetMode::Hard {
-            let target = git(
-                &self.root,
-                ["ls-tree", "-r", "-z", "--name-only", &request.target],
-            )?;
+            let target = self.git(["ls-tree", "-r", "-z", "--name-only", &request.target])?;
             // Include ignored files: reset --hard can remove untracked paths that obstruct its tree.
-            let others = git(&self.root, ["ls-files", "--others", "-z"])?;
+            let others = self.git(["ls-files", "--others", "-z"])?;
             let normalize = |path: PathBuf| {
                 #[cfg(any(target_os = "macos", windows))]
                 {
@@ -413,19 +395,16 @@ impl Repository {
             .as_nanos();
         let recovery = format!("refs/git-wirdo/recovery/{stamp}-{}", std::process::id());
         let zero = "0".repeat(request.snapshot.head.len());
-        git(
-            &self.root,
-            [
-                "update-ref",
-                "--create-reflog",
-                "-m",
-                "git-wirdo before reset",
-                &recovery,
-                &request.snapshot.head,
-                &zero,
-            ],
-        )?;
-        git(&self.root, ["reset", mode.flag(), &request.target, "--"])?;
+        self.git([
+            "update-ref",
+            "--create-reflog",
+            "-m",
+            "git-wirdo before reset",
+            &recovery,
+            &request.snapshot.head,
+            &zero,
+        ])?;
+        self.git(["reset", mode.flag(), &request.target, "--"])?;
         Ok(recovery)
     }
 
@@ -464,7 +443,7 @@ impl Repository {
             args.extend(["--mainline".into(), n.to_string()]);
         }
         args.extend(["--".into(), sha.to_owned()]);
-        git(&self.root, args)?;
+        self.git(args)?;
         Ok(())
     }
 
@@ -475,15 +454,15 @@ impl Repository {
             "Resolve and stage all conflicts before continuing"
         );
         if state.am_in_progress {
-            git(&self.root, ["am", "--continue"])?;
+            self.git(["am", "--continue"])?;
         } else if state.rebase_in_progress {
-            git(&self.root, ["rebase", "--continue"])?;
+            self.git(["rebase", "--continue"])?;
         } else if state.cherry_pick_in_progress {
-            git(&self.root, ["cherry-pick", "--continue"])?;
+            self.git(["cherry-pick", "--continue"])?;
         } else if state.revert_in_progress {
-            git(&self.root, ["revert", "--continue"])?;
+            self.git(["revert", "--continue"])?;
         } else if state.merge_in_progress {
-            git(&self.root, ["commit", "--no-edit"])?;
+            self.git(["commit", "--no-edit"])?;
         } else {
             bail!("No Git operation in progress");
         }
@@ -495,22 +474,22 @@ impl Repository {
             self.merge_state(&[])?.rebase_in_progress,
             "No rebase in progress"
         );
-        git(&self.root, ["rebase", "--skip"])?;
+        self.git(["rebase", "--skip"])?;
         Ok(())
     }
 
     pub fn abort_operation(&self) -> Result<()> {
         let state = self.merge_state(&[])?;
         if state.am_in_progress {
-            git(&self.root, ["am", "--abort"])?;
+            self.git(["am", "--abort"])?;
         } else if state.rebase_in_progress {
-            git(&self.root, ["rebase", "--abort"])?;
+            self.git(["rebase", "--abort"])?;
         } else if state.cherry_pick_in_progress {
-            git(&self.root, ["cherry-pick", "--abort"])?;
+            self.git(["cherry-pick", "--abort"])?;
         } else if state.revert_in_progress {
-            git(&self.root, ["revert", "--abort"])?;
+            self.git(["revert", "--abort"])?;
         } else if state.merge_in_progress {
-            git(&self.root, ["merge", "--abort"])?;
+            self.git(["merge", "--abort"])?;
         } else {
             bail!("No Git operation in progress");
         }

@@ -3,7 +3,7 @@ use super::*;
 
 impl Repository {
     pub fn workspaces(&self) -> Result<Vec<crate::model::Workspace>> {
-        let bytes = git(&self.root, ["worktree", "list", "--porcelain", "-z"])?;
+        let bytes = self.git(["worktree", "list", "--porcelain", "-z"])?;
         let mut result = Vec::new();
         let mut current: Option<crate::model::Workspace> = None;
         for record in bytes.split(|b| *b == 0) {
@@ -32,20 +32,17 @@ impl Repository {
     }
 
     pub fn create_workspace(&self, path: &Path, branch: &str) -> Result<()> {
-        git(&self.root, ["check-ref-format", "--branch", branch])?;
+        self.git(["check-ref-format", "--branch", branch])?;
         let path = self.resolve(path);
-        git(
-            &self.root,
-            [
-                OsString::from("worktree"),
-                OsString::from("add"),
-                OsString::from("-b"),
-                OsString::from(branch),
-                OsString::from("--"),
-                path.into_os_string(),
-                OsString::from("HEAD"),
-            ],
-        )?;
+        self.git([
+            OsString::from("worktree"),
+            OsString::from("add"),
+            OsString::from("-b"),
+            OsString::from(branch),
+            OsString::from("--"),
+            path.into_os_string(),
+            OsString::from("HEAD"),
+        ])?;
         Ok(())
     }
 
@@ -59,15 +56,12 @@ impl Repository {
             "Cannot remove the current workspace"
         );
         // Git refuses the primary checkout, dirty worktrees and locked worktrees. Never force.
-        git(
-            &self.root,
-            [
-                OsString::from("worktree"),
-                OsString::from("remove"),
-                OsString::from("--"),
-                workspace.path.as_os_str().to_owned(),
-            ],
-        )?;
+        self.git([
+            OsString::from("worktree"),
+            OsString::from("remove"),
+            OsString::from("--"),
+            workspace.path.as_os_str().to_owned(),
+        ])?;
         Ok(())
     }
 }

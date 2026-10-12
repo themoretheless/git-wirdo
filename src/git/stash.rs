@@ -3,10 +3,7 @@ use super::*;
 
 impl Repository {
     pub fn stashes(&self) -> Result<Vec<crate::model::StashEntry>> {
-        let bytes = git(
-            &self.root,
-            ["stash", "list", "-z", "--format=%gd%x00%H%x00%s"],
-        )?;
+        let bytes = self.git(["stash", "list", "-z", "--format=%gd%x00%H%x00%s"])?;
         let text = std::str::from_utf8(&bytes).context("Invalid UTF-8 stash metadata")?;
         let fields: Vec<_> = text.split_terminator('\0').collect();
         let (records, remainder) = fields.as_chunks::<3>();
@@ -41,10 +38,7 @@ impl Repository {
             "Finish the current operation before saving a stash"
         );
         ensure!(!state.files.is_empty(), "No changes to stash");
-        git(
-            &self.root,
-            ["stash", "push", "--include-untracked", "--message", message],
-        )?;
+        self.git(["stash", "push", "--include-untracked", "--message", message])?;
         Ok(())
     }
 
@@ -62,21 +56,18 @@ impl Repository {
         self.ensure_clean()?;
         self.verify_stash(stash)?;
         // Native pop retains the reflog entry on conflict. --index restores staged changes.
-        git(
-            &self.root,
-            [
-                "stash",
-                if pop { "pop" } else { "apply" },
-                "--index",
-                &stash.selector,
-            ],
-        )?;
+        self.git([
+            "stash",
+            if pop { "pop" } else { "apply" },
+            "--index",
+            &stash.selector,
+        ])?;
         Ok(())
     }
 
     pub fn drop_stash(&self, stash: &crate::model::StashEntry) -> Result<()> {
         self.verify_stash(stash)?;
-        git(&self.root, ["stash", "drop", &stash.selector])?;
+        self.git(["stash", "drop", &stash.selector])?;
         Ok(())
     }
 }

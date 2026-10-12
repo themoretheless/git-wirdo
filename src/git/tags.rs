@@ -37,7 +37,7 @@ impl Repository {
 
     pub fn create_tag(&self, name: &str, target: &str, message: &str) -> Result<()> {
         let reference = format!("refs/tags/{name}");
-        git(&self.root, ["check-ref-format", &reference])?;
+        self.git(["check-ref-format", &reference])?;
         let target = if target.trim().is_empty() {
             "HEAD"
         } else {
@@ -46,12 +46,9 @@ impl Repository {
         let target = format!("{target}^{{commit}}");
         let sha = self.text(&["rev-parse", "--verify", "--end-of-options", &target])?;
         if message.trim().is_empty() {
-            git(&self.root, ["tag", "--no-sign", "--", name, sha.trim()])?;
+            self.git(["tag", "--no-sign", "--", name, sha.trim()])?;
         } else {
-            git(
-                &self.root,
-                ["tag", "-a", "-m", message, "--", name, sha.trim()],
-            )?;
+            self.git(["tag", "-a", "-m", message, "--", name, sha.trim()])?;
         }
         Ok(())
     }
@@ -69,7 +66,7 @@ impl Repository {
     pub fn delete_tag(&self, tag: &crate::model::TagEntry) -> Result<()> {
         // Compare-and-swap ref deletion refuses a tag changed since selection.
         let reference = format!("refs/tags/{}", tag.name);
-        git(&self.root, ["update-ref", "-d", &reference, &tag.sha])?;
+        self.git(["update-ref", "-d", &reference, &tag.sha])?;
         Ok(())
     }
 
@@ -79,7 +76,7 @@ impl Repository {
         let reference = format!("refs/tags/{}", tag.name);
         // Publish the selected object, not an unrelated tag or a later replacement.
         let spec = format!("{}:{reference}", tag.sha);
-        git(&self.root, ["push", "--progress", "--", remote, &spec])?;
+        self.git(["push", "--progress", "--", remote, &spec])?;
         Ok(())
     }
 
@@ -88,10 +85,7 @@ impl Repository {
         let reference = format!("refs/tags/{}", tag.name);
         let lease = format!("--force-with-lease={reference}:{}", tag.sha);
         let spec = format!(":{reference}");
-        git(
-            &self.root,
-            ["push", "--progress", &lease, "--", remote, &spec],
-        )?;
+        self.git(["push", "--progress", &lease, "--", remote, &spec])?;
         Ok(())
     }
 }

@@ -28,27 +28,27 @@ impl Repository {
             !name.is_empty() && !name.starts_with('-') && !url.trim().is_empty(),
             "Remote name and URL are required"
         );
-        git(&self.root, ["remote", "add", "--", name, url])?;
+        self.git(["remote", "add", "--", name, url])?;
         Ok(())
     }
 
     pub fn edit_remote(&self, name: &str, url: &str) -> Result<()> {
         self.verify_remote(name)?;
         ensure!(!url.trim().is_empty(), "URL is required");
-        git(&self.root, ["remote", "set-url", "--", name, url])?;
+        self.git(["remote", "set-url", "--", name, url])?;
         Ok(())
     }
 
     pub fn edit_push_url(&self, name: &str, url: &str) -> Result<()> {
         self.verify_remote(name)?;
         ensure!(!url.trim().is_empty(), "Push URL is required");
-        git(&self.root, ["remote", "set-url", "--push", "--", name, url])?;
+        self.git(["remote", "set-url", "--push", "--", name, url])?;
         Ok(())
     }
 
     pub fn remove_remote(&self, name: &str) -> Result<()> {
         self.verify_remote(name)?;
-        git(&self.root, ["remote", "remove", "--", name])?;
+        self.git(["remote", "remove", "--", name])?;
         Ok(())
     }
 
@@ -71,9 +71,9 @@ impl Repository {
             self.remote_branches()?.iter().any(|b| b == remote_branch),
             "Remote branch no longer exists"
         );
-        git(&self.root, ["check-ref-format", "--branch", local])?;
+        self.git(["check-ref-format", "--branch", local])?;
         let reference = format!("refs/remotes/{remote_branch}");
-        git(&self.root, ["switch", "--track", "-c", local, &reference])?;
+        self.git(["switch", "--track", "-c", local, &reference])?;
         Ok(())
     }
 
@@ -100,11 +100,11 @@ impl Repository {
 
     pub fn set_upstream(&self, reference: &str) -> Result<()> {
         if reference.trim().is_empty() {
-            git(&self.root, ["branch", "--unset-upstream"])?;
+            self.git(["branch", "--unset-upstream"])?;
             return Ok(());
         }
         let arg = format!("--set-upstream-to={reference}");
-        git(&self.root, ["branch", &arg])?;
+        self.git(["branch", &arg])?;
         Ok(())
     }
 
@@ -112,18 +112,15 @@ impl Repository {
         self.verify_remote(remote)?;
         let branch = self.current_branch()?;
         let reference = format!("refs/heads/{branch}");
-        git(&self.root, ["show-ref", "--verify", &reference])?;
-        git(
-            &self.root,
-            [
-                "push",
-                "--progress",
-                "--set-upstream",
-                "--",
-                remote,
-                &reference,
-            ],
-        )?;
+        self.git(["show-ref", "--verify", &reference])?;
+        self.git([
+            "push",
+            "--progress",
+            "--set-upstream",
+            "--",
+            remote,
+            &reference,
+        ])?;
         Ok(())
     }
 
@@ -131,16 +128,13 @@ impl Repository {
         self.ensure_clean()?;
         match strategy {
             "ff-only" => {
-                git(&self.root, ["pull", "--progress", "--ff-only"])?;
+                self.git(["pull", "--progress", "--ff-only"])?;
             }
             "merge" => {
-                git(
-                    &self.root,
-                    ["pull", "--progress", "--no-rebase", "--ff", "--no-edit"],
-                )?;
+                self.git(["pull", "--progress", "--no-rebase", "--ff", "--no-edit"])?;
             }
             "rebase" => {
-                git(&self.root, ["pull", "--progress", "--rebase", "--ff"])?;
+                self.git(["pull", "--progress", "--rebase", "--ff"])?;
             }
             _ => bail!("Choose ff-only, merge or rebase"),
         }
@@ -149,22 +143,22 @@ impl Repository {
 
     pub fn fetch_remote(&self, name: &str) -> Result<()> {
         self.verify_remote(name)?;
-        git(&self.root, ["fetch", "--progress", "--", name])?;
+        self.git(["fetch", "--progress", "--", name])?;
         Ok(())
     }
 
     pub fn fetch(&self) -> Result<()> {
-        git(&self.root, ["fetch", "--all", "--progress"])?;
+        self.git(["fetch", "--all", "--progress"])?;
         Ok(())
     }
 
     pub fn pull(&self) -> Result<()> {
-        git(&self.root, ["pull", "--progress", "--ff-only"])?;
+        self.git(["pull", "--progress", "--ff-only"])?;
         Ok(())
     }
 
     pub fn push(&self) -> Result<()> {
-        git(&self.root, ["push", "--progress"])?;
+        self.git(["push", "--progress"])?;
         Ok(())
     }
 }
