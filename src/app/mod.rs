@@ -591,12 +591,10 @@ impl App {
             KeyCode::Backspace => {
                 prompt.text.pop();
             }
-            KeyCode::Enter => {
-                if prompt.advance() {
-                    let prompt = self.prompt.take().unwrap();
-                    if let Err(error) = self.submit_prompt(prompt) {
-                        self.fail(error);
-                    }
+            KeyCode::Enter if prompt.advance() => {
+                let prompt = self.prompt.take().unwrap();
+                if let Err(error) = self.submit_prompt(prompt) {
+                    self.fail(error);
                 }
             }
             _ => {}
