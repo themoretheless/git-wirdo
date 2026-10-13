@@ -151,3 +151,31 @@ Expanded acceptance evidence:
   (199), and Windows (171). Native Windows scenarios confirmed both palette form
   routing and continue/abort of mail conflicts. Repository tests also verified
   abort of a partly applied series and preservation of apply-backend rebase.
+
+## GitHub repository creation and internal consolidation
+
+- Added `N` in GitHubRepositories: create a `private`/`public`/`internal`
+  repository by name, optionally linking the current checkout as a named remote
+  through `gh repo create --source . --remote`. Nothing is pushed; publishing
+  stays an explicit `W`/`P` step. Typed `create` confirmation is required, and
+  cancelled forms never contact GitHub. Covered by transport and TUI fixture tests.
+- Application logic is split into `app/{mod,actions,prompt,detail}.rs`. Actions
+  are dispatched per view before global fallbacks; prompt submissions compute one
+  result and reload the repository exactly once, replacing the earlier
+  double refresh after commits, stashes, pulls and branch integration.
+- Shared helpers replace repeated code: list cursor clamping, success/failure
+  reporting, typed confirmations, `Repository::resolve_path`, the `Operation`
+  enum for continue/abort/summary, and shared machine-readable diff flags.
+- Performance: a refresh loads history once at the current window size instead
+  of three times; the terminal redraws only after input, background progress or
+  settings changes instead of ten times a second; escaped detail text is cached
+  across frames.
+
+Remaining scope audit after this work: no roadmap capability is left
+unimplemented. Items still listed as limits are deliberate or unverifiable here:
+Delta-style agent threads and cloud collaboration are outside a Git client;
+successful review verdicts from a second GitHub account need a second account;
+`stash clear` and recursive submodule reset stay unexposed as safety choices.
+Local acceptance for this iteration: formatting, strict all-target Clippy and all
+28 test binaries (including Unix PTY workflows) pass; hosted CI on Linux, macOS
+and Windows has not yet run on these changes.

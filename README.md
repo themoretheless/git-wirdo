@@ -179,7 +179,14 @@ Background tasks keep the terminal responsive while Git runs.
 - `src/patch.rs` — exact-byte hunk separation for selective staging
 - `src/git.rs` — repository discovery, machine-readable Git output, and Git operations
 - `src/model.rs` — repository data and display-safe path labels
-- `src/app.rs` — UI-independent actions, selections, refresh, and error handling
+- `src/app/mod.rs` — application state, selections, refresh, and error handling
+- `src/app/actions.rs` — action dispatch: the current view claims an action first, then global ones
+- `src/app/prompt.rs` — multi-field forms, typed confirmations, and one reload per submission
+- `src/app/detail.rs` — detail pane contents and in-pane search
+- `src/commands.rs` — searchable command palette entries per view
+- `src/github.rs`, `src/pr_review.rs` — GitHub CLI transport, PR lifecycle, and inline review
+- `src/process.rs`, `src/session.rs` — cancellable background tasks and the serialized worker
+- `src/settings.rs` — persisted navigation state with locked, atomic merges
 - `src/input.rs` — terminal key events mapped to application actions
 - `src/ui.rs` — Ratatui rendering and list scroll state
 - `src/terminal.rs` — terminal lifecycle and event loop
@@ -330,6 +337,7 @@ reviews, conversation and inline comments, including outdated locations.
 | --- | --- |
 | `Enter` | Checkout the PR; refuses dirty files or an unfinished merge/rebase |
 | `V` | Show its patch; existing scrolling and search work here |
+| `N` (GitHubRepositories) | Create a GitHub repository, optionally linked as a remote |
 | `N` | Create a draft PR with title, body, base and published head branch |
 | `A` | Submit an approval with the entered review body |
 | `R` | Submit a request-changes review with the entered body |
@@ -364,7 +372,15 @@ GitHubRepositories lists up to 100 repositories owned by the signed-in user.
 Enter asks for a new clone directory, clones that repository and opens it. This
 list does not include every organization or repository shared with the user.
 GitHub requests run in the same cancellable background task as Git operations.
-Repository creation is not implemented. CLI `--pr-files NUMBER` inspects the
+
+`N` creates a repository on GitHub: enter `name` or `owner/name`, a visibility
+(`private`, `public` or `internal`), an optional remote name and type `create`.
+With a remote name, the current checkout is linked to the new repository through
+`gh repo create --source . --remote NAME`; nothing is pushed until you publish
+with `W` or `P`. Leaving the remote blank creates an empty repository only.
+Organization permissions and name conflicts are reported by GitHub as errors.
+
+CLI `--pr-files NUMBER` inspects the
 line-numbered patches; `--list-prs` accepts `--pr-state`, `--pr-search`, and
 `--pr-limit`. CLI `--pr NUMBER` includes paginated inline review comments.
 
@@ -488,7 +504,9 @@ reflogs; Git's configured reflog expiration still applies.
 
 ## Background tasks and cancellation
 
-The terminal keeps rendering during Git, GitHub and hook execution. One task at
+The terminal keeps rendering during Git, GitHub and hook execution; an idle
+client redraws only after input, a resize or a settings change rather than on a
+timer. One task at
 a time owns repository operations; additional mutations are rejected rather than
 queued. Diff scrolling remains available while a task is running. The footer
 shows elapsed time and the latest command diagnostic (including Git transfer

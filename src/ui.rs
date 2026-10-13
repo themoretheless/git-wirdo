@@ -10,9 +10,20 @@ use crate::model::{ViewMode, display_path};
 #[derive(Default)]
 pub struct Ui {
     lists: [ListState; 15],
+    /// The detail text last rendered and its escaped form; large patches are escaped once.
+    detail_source: String,
+    detail_rendered: String,
 }
 
 impl Ui {
+    fn rendered_detail(&mut self, text: &str) -> &str {
+        if self.detail_source != text {
+            self.detail_source = text.to_owned();
+            self.detail_rendered = safe_text(text);
+        }
+        &self.detail_rendered
+    }
+
     pub fn draw(&mut self, frame: &mut Frame<'_>, app: &App) {
         if frame.area().width < 60 || frame.area().height < 16 {
             frame.render_widget(
@@ -84,7 +95,7 @@ impl Ui {
         } else {
             "Details".into()
         };
-        let detail = Paragraph::new(safe_text(&app.detail_text))
+        let detail = Paragraph::new(self.rendered_detail(&app.detail_text))
             .block(Block::default().borders(Borders::ALL).title(title))
             .scroll((app.detail_scroll, app.detail_column));
         frame.render_widget(detail, body[1]);
@@ -110,7 +121,9 @@ impl Ui {
             }
             ViewMode::Reflog => "+ older entries | N recover into new branch",
             ViewMode::Branches => "enter switch | b new | B rename | D delete | m merge | z rebase",
-            ViewMode::GitHubRepositories => "enter clone | G auth status | O open local repository",
+            ViewMode::GitHubRepositories => {
+                "enter clone | N create repository | G auth status | O open local repository"
+            }
             ViewMode::Workspaces => "enter open | N create | D remove | O open repository",
             ViewMode::PrFiles => "j/k file | C line comment | PgUp/PgDn patch | r refresh",
             ViewMode::PullRequests => {

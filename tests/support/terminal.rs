@@ -189,9 +189,10 @@ impl TerminalFixture {
     }
     pub fn send(&mut self, bytes: &[u8]) {
         self.drain();
-        // Ratatui hides the cursor after drawing each frame. Allow an in-flight
-        // old frame, then require a complete frame after the input was read.
-        self.minimum_frame = self.frame_count + 2;
+        // Ratatui hides the cursor after drawing each frame. The client redraws once per
+        // input event (plus progress frames while a task runs), never on an idle timer, so a
+        // complete frame after this input proves the input was read.
+        self.minimum_frame = self.frame_count + 1;
         self.master.as_mut().unwrap().write_all(bytes).unwrap();
     }
     pub fn key(&mut self, bytes: &[u8], expected: &str) -> String {

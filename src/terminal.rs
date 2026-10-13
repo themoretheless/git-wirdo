@@ -76,33 +76,41 @@ pub fn run(repository: Repository, state_path: Option<PathBuf>) -> Result<()> {
     let mut terminal = Terminal::new(CrosstermBackend::new(io::stdout()))?;
     let mut ui = Ui::default();
     let mut last_save = Instant::now() - Duration::from_secs(1);
+    // Redraw only after input, a finished or running background task, or a settings change;
+    // an idle client must not rebuild every list ten times a second.
+    let mut dirty = true;
     loop {
+        dirty |= session.busy();
         session.tick();
         if !session.busy()
             && (last_save.elapsed() >= Duration::from_secs(1) || !session.app.running)
         {
             session.app.capture_navigation();
             if let Some(store) = &mut store {
+                let previous = session.app.persistence_error.take();
                 match store.persist(&session.app.navigation) {
-                    Ok(navigation) => {
-                        session.app.navigation = navigation;
-                        session.app.persistence_error = None;
-                    }
+                    Ok(navigation) => session.app.navigation = navigation,
                     Err(error) => session.app.persistence_error = Some(format!("{error:#}")),
                 }
+                dirty |= previous != session.app.persistence_error;
             }
             last_save = Instant::now();
         }
         if !session.app.running {
             break;
         }
-        terminal.draw(|frame| ui.draw(frame, &session.app))?;
+        if dirty {
+            terminal.draw(|frame| ui.draw(frame, &session.app))?;
+            dirty = false;
+        }
         if event::poll(Duration::from_millis(100))? {
             match event::read()? {
                 Event::Key(key) => session.handle_key(key),
                 Event::Paste(text) => session.handle_paste(&text),
-                _ => {}
+                Event::Resize(..) => {}
+                _ => continue,
             }
+            dirty = true;
         }
     }
     drop(terminal);
