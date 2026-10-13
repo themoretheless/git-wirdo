@@ -176,6 +176,8 @@ unimplemented. Items still listed as limits are deliberate or unverifiable here:
 Delta-style agent threads and cloud collaboration are outside a Git client;
 successful review verdicts from a second GitHub account need a second account;
 `stash clear` and recursive submodule reset stay unexposed as safety choices.
-Local acceptance for this iteration: formatting, strict all-target Clippy and all
-28 test binaries (including Unix PTY workflows) pass; hosted CI on Linux, macOS
-and Windows has not yet run on these changes.
+[Consolidation acceptance](https://github.com/themoretheless/git-wirdo/actions/runs/38466337904)
+passed formatting, strict all-target Clippy and every test on Linux (203), macOS
+(202) and Windows (173), including the event-driven redraw through real Unix PTY
+and native ConPTY sessions. Live creation of a GitHub repository through the new
+form has not been exercised against GitHub; the transport is fixture-tested.
