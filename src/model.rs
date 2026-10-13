@@ -56,28 +56,61 @@ pub struct MergeState {
     pub conflicts: Vec<PathBuf>,
 }
 
+/// A multi-step Git operation that can be continued or aborted.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Operation {
+    MailImport,
+    Rebase,
+    CherryPick,
+    Revert,
+    Merge,
+}
+
+impl Operation {
+    /// The Git subcommand that owns `--continue` / `--abort` for this operation.
+    pub fn command(self) -> &'static str {
+        match self {
+            Self::MailImport => "am",
+            Self::Rebase => "rebase",
+            Self::CherryPick => "cherry-pick",
+            Self::Revert => "revert",
+            Self::Merge => "merge",
+        }
+    }
+
+    pub fn label(self) -> &'static str {
+        match self {
+            Self::MailImport => "Mail patch import",
+            Self::Rebase => "Rebase",
+            Self::CherryPick => "Cherry-pick",
+            Self::Revert => "Revert",
+            Self::Merge => "Merge",
+        }
+    }
+}
+
 impl MergeState {
     pub fn in_progress(&self) -> bool {
-        self.merge_in_progress
-            || self.rebase_in_progress
-            || self.am_in_progress
-            || self.cherry_pick_in_progress
-            || self.revert_in_progress
+        self.operation().is_some()
+    }
+
+    /// Mail import shares Git's rebase-apply directory, so it is reported first.
+    pub fn operation(&self) -> Option<Operation> {
+        [
+            (self.am_in_progress, Operation::MailImport),
+            (self.rebase_in_progress, Operation::Rebase),
+            (self.cherry_pick_in_progress, Operation::CherryPick),
+            (self.revert_in_progress, Operation::Revert),
+            (self.merge_in_progress, Operation::Merge),
+        ]
+        .into_iter()
+        .find_map(|(active, operation)| active.then_some(operation))
     }
 
     pub fn summary(&self) -> String {
-        let operation = if self.am_in_progress {
-            "Mail patch import in progress"
-        } else if self.rebase_in_progress {
-            "Rebase in progress"
-        } else if self.cherry_pick_in_progress {
-            "Cherry-pick in progress"
-        } else if self.revert_in_progress {
-            "Revert in progress"
-        } else if self.merge_in_progress {
-            "Merge in progress"
-        } else {
-            "No Git operation in progress"
+        let operation = match self.operation() {
+            Some(operation) => format!("{} in progress", operation.label()),
+            None => "No Git operation in progress".to_owned(),
         };
         format!("{operation}\nConflicts: {}", self.conflicts.len())
     }

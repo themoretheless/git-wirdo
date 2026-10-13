@@ -6,9 +6,20 @@ use std::process::{Command, Output, Stdio};
 
 use anyhow::{Context, Result, bail, ensure};
 
-use crate::model::{BranchEntry, CommitEntry, FileEntry, MergeState, RepoState, display_path};
+use crate::model::{
+    BranchEntry, CommitEntry, FileEntry, MergeState, Operation, RepoState, display_path,
+};
 
 const PREVIEW_LIMIT: usize = 256 * 1024;
+/// Commits initially loaded for history; `+` extends the window.
+pub const HISTORY_PAGE: usize = 20;
+/// Output must be machine-readable: no colors, external diff drivers or textconv filters.
+const PLAIN: &[&str] = &["--no-color", "--no-ext-diff", "--no-textconv"];
+
+/// Join argument groups so shared flag sets are declared once.
+fn args<'a>(groups: &[&[&'a str]]) -> Vec<&'a str> {
+    groups.concat()
+}
 
 #[derive(Debug, Clone)]
 pub struct Repository {
@@ -162,6 +173,15 @@ impl Repository {
         &self.root
     }
 
+    /// Relative user input is interpreted from the repository root, not the process directory.
+    pub fn resolve_path(&self, path: &Path) -> PathBuf {
+        if path.is_absolute() {
+            path.to_owned()
+        } else {
+            self.root.join(path)
+        }
+    }
+
     pub fn workspaces(&self) -> Result<Vec<crate::model::Workspace>> {
         let bytes = git(&self.root, ["worktree", "list", "--porcelain", "-z"])?;
         let mut result = Vec::new();
@@ -193,11 +213,7 @@ impl Repository {
 
     pub fn create_workspace(&self, path: &Path, branch: &str) -> Result<()> {
         git(&self.root, ["check-ref-format", "--branch", branch])?;
-        let path = if path.is_absolute() {
-            path.to_owned()
-        } else {
-            self.root.join(path)
-        };
+        let path = self.resolve_path(path);
         git(
             &self.root,
             [
@@ -253,31 +269,22 @@ impl Repository {
             &self.root,
             ["stash", "list", "-z", "--format=%gd%x00%H%x00%s"],
         )?;
-        let text = std::str::from_utf8(&bytes).context("Invalid UTF-8 stash metadata")?;
-        let fields: Vec<_> = text.split_terminator('\0').collect();
-        let (records, remainder) = fields.as_chunks::<3>();
-        ensure!(remainder.is_empty(), "Invalid stash list record");
-        Ok(records
-            .iter()
-            .map(|r| crate::model::StashEntry {
-                selector: r[0].into(),
-                sha: r[1].into(),
-                subject: r[2].into(),
+        Ok(nul_records::<3>(&bytes, "stash")?
+            .into_iter()
+            .map(|[selector, sha, subject]| crate::model::StashEntry {
+                selector,
+                sha,
+                subject,
             })
             .collect())
     }
 
     pub fn stash_detail(&self, stash: &crate::model::StashEntry) -> Result<String> {
-        self.text(&[
-            "stash",
-            "show",
-            "--include-untracked",
-            "--patch",
-            "--no-color",
-            "--no-ext-diff",
-            "--no-textconv",
-            &stash.sha,
-        ])
+        self.text(&args(&[
+            &["stash", "show", "--include-untracked", "--patch"],
+            PLAIN,
+            &[&stash.sha],
+        ]))
     }
 
     pub fn save_stash(&self, message: &str) -> Result<()> {
@@ -333,30 +340,19 @@ impl Repository {
             "--format=%(refname:strip=2)%00%(objectname)%00%(objecttype)%00%(subject)",
             "refs/tags/",
         ])?;
-        text.lines()
-            .map(|line| {
-                let fields: Vec<_> = line.splitn(4, '\0').collect();
-                ensure!(fields.len() == 4, "Invalid tag record");
-                Ok(crate::model::TagEntry {
-                    name: fields[0].into(),
-                    sha: fields[1].into(),
-                    kind: fields[2].into(),
-                    subject: fields[3].into(),
-                })
+        Ok(line_records::<4>(&text, "tag")?
+            .into_iter()
+            .map(|[name, sha, kind, subject]| crate::model::TagEntry {
+                name,
+                sha,
+                kind,
+                subject,
             })
-            .collect()
+            .collect())
     }
 
     pub fn tag_detail(&self, tag: &crate::model::TagEntry) -> Result<String> {
-        self.text(&[
-            "show",
-            "--no-color",
-            "--no-ext-diff",
-            "--no-textconv",
-            "--stat",
-            &tag.sha,
-            "--",
-        ])
+        self.text(&args(&[&["show"], PLAIN, &["--stat", &tag.sha, "--"]]))
     }
 
     pub fn create_tag(&self, name: &str, target: &str, message: &str) -> Result<()> {
@@ -419,17 +415,37 @@ impl Repository {
         Ok(())
     }
 
+    /// One `remote -v` call lists every fetch and push URL; URLs may contain spaces, so the
+    /// trailing kind marker is split off from the right.
     pub fn remotes(&self) -> Result<Vec<crate::model::RemoteEntry>> {
-        self.text(&["remote"])?
-            .lines()
-            .map(|name| {
-                Ok(crate::model::RemoteEntry {
-                    name: name.into(),
-                    fetch_urls: self.text(&["remote", "get-url", "--all", name])?,
-                    push_urls: self.text(&["remote", "get-url", "--push", "--all", name])?,
-                })
-            })
-            .collect()
+        let mut remotes: Vec<crate::model::RemoteEntry> = Vec::new();
+        for line in self.text(&["remote", "-v"])?.lines() {
+            let (name, rest) = line
+                .split_once('\t')
+                .context("Invalid remote record from Git")?;
+            let (url, kind) = rest
+                .rsplit_once(' ')
+                .context("Invalid remote URL record from Git")?;
+            let entry = match remotes.iter_mut().find(|remote| remote.name == name) {
+                Some(entry) => entry,
+                None => {
+                    remotes.push(crate::model::RemoteEntry {
+                        name: name.to_owned(),
+                        fetch_urls: String::new(),
+                        push_urls: String::new(),
+                    });
+                    remotes.last_mut().expect("just pushed")
+                }
+            };
+            let urls = match kind {
+                "(fetch)" => &mut entry.fetch_urls,
+                "(push)" => &mut entry.push_urls,
+                _ => bail!("Unknown remote URL kind {kind}"),
+            };
+            urls.push_str(url);
+            urls.push('\n');
+        }
+        Ok(remotes)
     }
 
     fn verify_remote(&self, name: &str) -> Result<()> {
@@ -565,6 +581,11 @@ impl Repository {
     }
 
     pub fn load_state(&self) -> Result<RepoState> {
+        self.load_state_with_history(HISTORY_PAGE)
+    }
+
+    /// One status/branch/history snapshot; the caller chooses how much history to keep loaded.
+    pub fn load_state_with_history(&self, history_limit: usize) -> Result<RepoState> {
         let files = parse_status(&git(
             &self.root,
             ["status", "--porcelain=v1", "-z", "--untracked-files=all"],
@@ -574,7 +595,7 @@ impl Repository {
             branch: self.current_branch()?,
             files,
             branches: self.branches()?,
-            commits: self.history(20)?,
+            commits: self.history(history_limit)?,
             merge_state,
         })
     }
@@ -610,17 +631,13 @@ impl Repository {
             ],
         )?;
         let text = std::str::from_utf8(&bytes).context("Git returned a non-UTF-8 branch name")?;
-        text.lines()
-            .map(|line| {
-                let (marker, name) = line
-                    .split_once('\0')
-                    .context("Invalid branch record from Git")?;
-                Ok(BranchEntry {
-                    name: name.to_owned(),
-                    current: marker == "*",
-                })
+        Ok(line_records::<2>(text, "branch")?
+            .into_iter()
+            .map(|[marker, name]| BranchEntry {
+                name,
+                current: marker == "*",
             })
-            .collect()
+            .collect())
     }
 
     pub fn history_graph(&self, limit: usize) -> Result<String> {
@@ -661,18 +678,14 @@ impl Repository {
                 "--format=%H%x00%h%x00%ad%x00%an%x00%s",
             ],
         )?;
-        let text = String::from_utf8_lossy(&bytes);
-        let fields: Vec<_> = text.split_terminator('\0').collect();
-        let (records, remainder) = fields.as_chunks::<5>();
-        ensure!(remainder.is_empty(), "Invalid commit record from Git");
-        Ok(records
-            .iter()
-            .map(|parts| CommitEntry {
-                sha: parts[0].to_owned(),
-                short_sha: parts[1].to_owned(),
-                date: parts[2].to_owned(),
-                author: parts[3].to_owned(),
-                subject: parts[4].to_owned(),
+        Ok(nul_records::<5>(&bytes, "commit")?
+            .into_iter()
+            .map(|[sha, short_sha, date, author, subject]| CommitEntry {
+                sha,
+                short_sha,
+                date,
+                author,
+                subject,
             })
             .collect())
     }
@@ -785,21 +798,21 @@ impl Repository {
         if file.conflicted || file.original_path.is_some() || file.status == "??" {
             return Ok(Vec::new());
         }
-        let mut args = vec![
-            "diff",
-            "--no-color",
-            "--no-ext-diff",
-            "--no-textconv",
-            "--no-renames",
-            "--src-prefix=a/",
-            "--dst-prefix=b/",
-            "--unified=3",
-            "--inter-hunk-context=0",
-        ];
+        let mut diff = args(&[
+            &["diff"],
+            PLAIN,
+            &[
+                "--no-renames",
+                "--src-prefix=a/",
+                "--dst-prefix=b/",
+                "--unified=3",
+                "--inter-hunk-context=0",
+            ],
+        ]);
         if staged {
-            args.push("--cached");
+            diff.push("--cached");
         }
-        self.run_paths(&args, &[&file.path])
+        self.run_paths(&diff, &[&file.path])
     }
 
     pub fn hunks(&self, file: &FileEntry, staged: bool) -> Result<Vec<crate::patch::Hunk>> {
@@ -815,12 +828,12 @@ impl Repository {
             self.hunk_diff(&hunk.file, hunk.staged)? == hunk.snapshot,
             "Diff changed; refresh before applying a hunk"
         );
-        let mut args = vec!["apply", "--cached", "--whitespace=nowarn"];
+        let mut apply = vec!["apply", "--cached", "--whitespace=nowarn"];
         if hunk.staged {
-            args.push("--reverse");
+            apply.push("--reverse");
         }
-        args.push("-");
-        let mut command = git_command(&self.root, &args);
+        apply.push("-");
+        let mut command = git_command(&self.root, &apply);
         checked(crate::process::output_with_input(
             &mut command,
             Some(&hunk.patch),
@@ -833,20 +846,8 @@ impl Repository {
             return self.untracked_preview(&file.path);
         }
         let paths = file.paths();
-        let staged = self.path_text(
-            &[
-                "diff",
-                "--no-color",
-                "--no-ext-diff",
-                "--no-textconv",
-                "--cached",
-            ],
-            &paths,
-        )?;
-        let unstaged = self.path_text(
-            &["diff", "--no-color", "--no-ext-diff", "--no-textconv"],
-            &paths,
-        )?;
+        let staged = self.path_text(&args(&[&["diff"], PLAIN, &["--cached"]]), &paths)?;
+        let unstaged = self.path_text(&args(&[&["diff"], PLAIN]), &paths)?;
         let mut chunks = Vec::new();
         if !staged.is_empty() {
             chunks.push(format!("[STAGED]\n{staged}"));
@@ -897,14 +898,7 @@ impl Repository {
     pub fn upstream_detail(&self, file: &FileEntry) -> Result<String> {
         let base = self.upstream_base()?;
         self.path_text(
-            &[
-                "diff",
-                "--no-color",
-                "--no-ext-diff",
-                "--no-textconv",
-                "--no-renames",
-                &base,
-            ],
+            &args(&[&["diff"], PLAIN, &["--no-renames", &base]]),
             &[&file.path],
         )
     }
@@ -946,11 +940,7 @@ impl Repository {
     pub fn import_mail_patch(&self, path: &Path) -> Result<()> {
         self.ensure_clean()?;
         ensure!(!path.as_os_str().is_empty(), "Select a mail patch file");
-        let path = if path.is_absolute() {
-            path.to_owned()
-        } else {
-            self.root.join(path)
-        };
+        let path = self.resolve_path(path);
         ensure!(
             fs::metadata(&path)
                 .with_context(|| format!("Cannot read patch {}", display_path(&path)))?
@@ -1037,11 +1027,7 @@ impl Repository {
             !destination.as_os_str().is_empty(),
             "Enter a patch destination"
         );
-        let path = if destination.is_absolute() {
-            destination.to_owned()
-        } else {
-            self.root.join(destination)
-        };
+        let path = self.resolve_path(destination);
         use std::io::Write;
         let mut file = fs::OpenOptions::new()
             .write(true)
@@ -1072,19 +1058,17 @@ impl Repository {
             "File history limit must be 1..=10000"
         );
         self.path_text(
-            &[
-                "log",
-                "--follow",
-                "--no-color",
-                "--no-show-signature",
-                "--no-ext-diff",
-                "--no-textconv",
-                "--format=fuller",
-                "--patch",
-                "--stat",
-                &format!("--max-count={limit}"),
-                "HEAD",
-            ],
+            &args(&[
+                &["log", "--follow", "--no-show-signature"],
+                PLAIN,
+                &[
+                    "--format=fuller",
+                    "--patch",
+                    "--stat",
+                    &format!("--max-count={limit}"),
+                    "HEAD",
+                ],
+            ]),
             &[path],
         )
     }
@@ -1105,27 +1089,23 @@ impl Repository {
         )
     }
 
-    pub fn commit_detail(&self, commit: &CommitEntry) -> Result<String> {
-        self.text(&[
-            "show",
-            "--no-color",
-            "--no-show-signature",
-            "--no-ext-diff",
-            "--no-textconv",
-            "--stat",
-            "--patch",
-            "--decorate=short",
-            "--format=fuller",
-            &commit.sha,
-            "--",
-        ])
+    pub fn commit_detail(&self, sha: &str) -> Result<String> {
+        self.text(&args(&[
+            &["show", "--no-show-signature"],
+            PLAIN,
+            &[
+                "--stat",
+                "--patch",
+                "--decorate=short",
+                "--format=fuller",
+                sha,
+                "--",
+            ],
+        ]))
     }
 
     pub fn conflict_detail(&self, path: &Path) -> Result<String> {
-        self.path_text(
-            &["diff", "--no-color", "--no-ext-diff", "--no-textconv"],
-            &[path],
-        )
+        self.path_text(&args(&[&["diff"], PLAIN]), &[path])
     }
 
     pub fn stage(&self, file: &FileEntry) -> Result<()> {
@@ -1288,17 +1268,14 @@ impl Repository {
         } else {
             Vec::new()
         };
-        let text = String::from_utf8_lossy(&bytes);
-        let fields: Vec<_> = text.split_terminator('\0').collect();
-        let (records, remainder) = fields.as_chunks::<3>();
-        ensure!(remainder.is_empty(), "Invalid reflog record from Git");
-        let mut entries: Vec<_> = records
-            .iter()
-            .map(|p| crate::model::ReflogEntry {
-                sha: p[0].into(),
-                selector: p[1].into(),
-                subject: p[2].into(),
-            })
+        let entry = |[sha, selector, subject]: [String; 3]| crate::model::ReflogEntry {
+            sha,
+            selector,
+            subject,
+        };
+        let mut entries: Vec<_> = nul_records::<3>(&bytes, "reflog")?
+            .into_iter()
+            .map(entry)
             .collect();
         // Persistent pre-reset references remain discoverable even after HEAD reflog expires.
         let backups = self.text(&[
@@ -1308,18 +1285,11 @@ impl Repository {
             "--format=%(objectname)%00%(refname)%00%(subject)",
             "refs/git-wirdo/recovery/",
         ])?;
-        for line in backups.lines() {
-            let fields: Vec<_> = line.split('\0').collect();
-            ensure!(
-                fields.len() == 3,
-                "Invalid recovery reference record from Git"
-            );
-            entries.push(crate::model::ReflogEntry {
-                sha: fields[0].into(),
-                selector: fields[1].into(),
-                subject: fields[2].into(),
-            });
-        }
+        entries.extend(
+            line_records::<3>(&backups, "recovery reference")?
+                .into_iter()
+                .map(entry),
+        );
         Ok(entries)
     }
 
@@ -1467,13 +1437,7 @@ impl Repository {
     /// Apply or undo exactly one immutable commit, preserving Git's conflict state.
     pub fn apply_commit(&self, sha: &str, revert: bool, mainline: Option<usize>) -> Result<()> {
         self.ensure_clean()?;
-        ensure!(
-            matches!(sha.len(), 40 | 64) && sha.bytes().all(|b| b.is_ascii_hexdigit()),
-            "Select a full commit ID"
-        );
-        let target = format!("{sha}^{{commit}}");
-        let resolved = self.text(&["rev-parse", "--verify", "--end-of-options", &target])?;
-        ensure!(resolved.trim() == sha, "Selected commit changed");
+        self.verify_commit_id(sha)?;
         let parents = self.text(&["rev-list", "--parents", "-n", "1", sha])?;
         let count = parents.split_whitespace().count().saturating_sub(1);
         if count > 1 {
@@ -1487,19 +1451,13 @@ impl Repository {
                 "Mainline is only valid for merge commits"
             );
         }
-        let mut args = vec![
-            if revert {
-                "revert".to_owned()
-            } else {
-                "cherry-pick".to_owned()
-            },
-            "--no-edit".into(),
-        ];
-        if let Some(n) = mainline {
-            args.extend(["--mainline".into(), n.to_string()]);
+        let mainline = mainline.map(|n| n.to_string());
+        let mut command = vec![if revert { "revert" } else { "cherry-pick" }, "--no-edit"];
+        if let Some(n) = &mainline {
+            command.extend(["--mainline", n]);
         }
-        args.extend(["--".into(), sha.to_owned()]);
-        git(&self.root, args)?;
+        command.extend(["--", sha]);
+        git(&self.root, command)?;
         Ok(())
     }
 
@@ -1509,19 +1467,13 @@ impl Repository {
             state.conflicts.is_empty(),
             "Resolve and stage all conflicts before continuing"
         );
-        if state.am_in_progress {
-            git(&self.root, ["am", "--continue"])?;
-        } else if state.rebase_in_progress {
-            git(&self.root, ["rebase", "--continue"])?;
-        } else if state.cherry_pick_in_progress {
-            git(&self.root, ["cherry-pick", "--continue"])?;
-        } else if state.revert_in_progress {
-            git(&self.root, ["revert", "--continue"])?;
-        } else if state.merge_in_progress {
-            git(&self.root, ["commit", "--no-edit"])?;
-        } else {
-            bail!("No Git operation in progress");
-        }
+        let operation = state.operation().context("No Git operation in progress")?;
+        // A merge has no --continue; committing the resolved index finishes it.
+        let command = match operation {
+            Operation::Merge => ["commit", "--no-edit"],
+            other => [other.command(), "--continue"],
+        };
+        git(&self.root, command)?;
         Ok(())
     }
 
@@ -1535,20 +1487,11 @@ impl Repository {
     }
 
     pub fn abort_operation(&self) -> Result<()> {
-        let state = self.merge_state(&[])?;
-        if state.am_in_progress {
-            git(&self.root, ["am", "--abort"])?;
-        } else if state.rebase_in_progress {
-            git(&self.root, ["rebase", "--abort"])?;
-        } else if state.cherry_pick_in_progress {
-            git(&self.root, ["cherry-pick", "--abort"])?;
-        } else if state.revert_in_progress {
-            git(&self.root, ["revert", "--abort"])?;
-        } else if state.merge_in_progress {
-            git(&self.root, ["merge", "--abort"])?;
-        } else {
-            bail!("No Git operation in progress");
-        }
+        let operation = self
+            .merge_state(&[])?
+            .operation()
+            .context("No Git operation in progress")?;
+        git(&self.root, [operation.command(), "--abort"])?;
         Ok(())
     }
 
@@ -1686,6 +1629,27 @@ where
     S: AsRef<OsStr>,
 {
     checked(git_output(path, args)?)
+}
+
+/// NUL-terminated records of exactly `N` fields, as produced by `-z --format=...%x00...`.
+fn nul_records<const N: usize>(bytes: &[u8], what: &str) -> Result<Vec<[String; N]>> {
+    let text = String::from_utf8_lossy(bytes);
+    let fields: Vec<_> = text.split_terminator('\0').collect();
+    let (records, remainder) = fields.as_chunks::<N>();
+    ensure!(remainder.is_empty(), "Invalid {what} record from Git");
+    Ok(records.iter().map(|r| r.map(str::to_owned)).collect())
+}
+
+/// Newline-terminated records whose `N` fields are separated by NUL (`%00` in for-each-ref).
+fn line_records<const N: usize>(text: &str, what: &str) -> Result<Vec<[String; N]>> {
+    text.lines()
+        .map(|line| {
+            let fields: Vec<_> = line.splitn(N, '\0').collect();
+            <[&str; N]>::try_from(fields)
+                .map(|r| r.map(str::to_owned))
+                .map_err(|_| anyhow::anyhow!("Invalid {what} record from Git"))
+        })
+        .collect()
 }
 
 fn utf8_line(bytes: &[u8]) -> Result<String> {
