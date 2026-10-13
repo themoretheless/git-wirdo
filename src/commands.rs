@@ -84,7 +84,10 @@ pub fn filtered(view: ViewMode, query: &str) -> Vec<Entry> {
             ("Review pull request files", OpenHunks),
             ("Load more pull requests", LoadHistory),
         ],
-        ViewMode::GitHubRepositories => &[("Clone selected GitHub repository", SwitchBranch)],
+        ViewMode::GitHubRepositories => &[
+            ("Clone selected GitHub repository", SwitchBranch),
+            ("Create GitHub repository", New),
+        ],
         ViewMode::Stashes => &[
             ("Apply selected stash", ApplyStash),
             ("Pop selected stash", PopStash),

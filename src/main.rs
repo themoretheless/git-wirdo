@@ -125,6 +125,14 @@ fn main() -> Result<()> {
             .map(Ok)
             .unwrap_or_else(git_wirdo::settings::default_path)
     };
+    // --no-state disables persistence entirely; otherwise the configured state file is used.
+    let state_path = || -> Result<Option<PathBuf>> {
+        if cli.no_state {
+            Ok(None)
+        } else {
+            settings_path().map(Some)
+        }
+    };
     if cli.list_recent {
         for settings in git_wirdo::settings::load(&settings_path()?)?.repositories {
             println!("{}", display_path(&settings.root.path()?));
@@ -142,17 +150,7 @@ fn main() -> Result<()> {
             .path()?,
         None => env::current_dir().context("Cannot determine the current directory")?,
     };
-    let start = || {
-        welcome::run(
-            path.clone(),
-            if cli.no_state {
-                None
-            } else {
-                Some(settings_path()?)
-            }
-            .as_deref(),
-        )
-    };
+    let start = || welcome::run(path.clone(), state_path()?.as_deref());
     let repository = if cli.start {
         match start()? {
             Some(repository) => repository,
@@ -336,12 +334,5 @@ fn main() -> Result<()> {
         }
         return Ok(());
     }
-    terminal::run(
-        repository,
-        if cli.no_state {
-            None
-        } else {
-            Some(settings_path()?)
-        },
-    )
+    terminal::run(repository, state_path()?)
 }

@@ -1,11 +1,17 @@
-use crate::model::FileEntry;
-use anyhow::{Context, Result};
+//! UI-independent application state. Key bindings live in `input`, rendering in `ui`.
+mod actions;
+mod detail;
+mod prompt;
+
+pub use prompt::{Prompt, PromptKind};
+
+use anyhow::Result;
 use crossterm::event::{KeyCode, KeyEvent, KeyEventKind, KeyModifiers};
 use std::collections::HashMap;
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 
-use crate::git::{ConflictSide, Repository};
-use crate::model::{RepoState, ViewMode, display_path};
+use crate::git::{HISTORY_PAGE, Repository};
+use crate::model::{FileEntry, RepoState, ViewMode};
 
 /// UI-independent commands; terminal key bindings live in `input`.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -75,59 +81,16 @@ pub enum Action {
     Abort,
 }
 
-#[derive(Debug, Clone)]
-pub enum PromptKind {
-    CommandPalette,
-    ImportPatch,
-    ExportCommit(String),
-    FilterPr,
-    EditPr(crate::github::EditablePr),
-    ReadyPr(crate::github::PullRequest),
-    InlinePr(crate::github::PullRequest, crate::pr_review::PrFile),
-    ResetCommit(crate::git::ResetRequest),
-    RecoverCommit(String),
-    ApplyCommit(String, bool),
-    RestoreFile(crate::git::RestoreRequest),
-    CreateTag,
-    DeleteTag(crate::model::TagEntry),
-    PublishTag(crate::model::TagEntry),
-    DeleteRemoteTag(crate::model::TagEntry),
-    AddRemote,
-    EditPushUrl(String),
-    EditRemote(String),
-    RemoveRemote(String),
-    CheckoutRemote(String),
-    SetUpstream,
-    PublishBranch,
-    PullStrategy,
-    SaveStash,
-    ApplyStash(crate::model::StashEntry, bool),
-    DropStash(crate::model::StashEntry),
-    Commit(bool),
-    Branch,
-    RenameBranch(String),
-    DeleteBranch(String),
-    IntegrateBranch(String, bool),
-    CloneRepository(String),
-    InitializeRepository,
-    CloneGitRepository,
-    Workspace,
-    OpenRepository,
-    Remove(crate::model::Workspace),
-    CreatePr,
-    Merge(crate::github::PullRequest),
-    Review(crate::github::PullRequest, &'static str),
-    Comment(u64),
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub enum FileDetail {
+    #[default]
+    Diff,
+    History,
+    Blame,
 }
 
-#[derive(Debug, Clone)]
-pub struct Prompt {
-    pub kind: PromptKind,
-    pub labels: Vec<&'static str>,
-    pub values: Vec<String>,
-    pub text: String,
-    pub defaults: Vec<String>,
-}
+/// Largest accepted size of one typed or pasted input field.
+const INPUT_LIMIT: usize = 64 * 1024;
 
 #[derive(Debug, Clone)]
 pub struct App {
@@ -187,12 +150,9 @@ pub struct App {
     pub staged_hunks: bool,
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
-pub enum FileDetail {
-    #[default]
-    Diff,
-    History,
-    Blame,
+/// Keep a list cursor inside the list after its contents changed.
+fn clamp(selection: &mut usize, len: usize) {
+    *selection = (*selection).min(len.saturating_sub(1));
 }
 
 impl App {
@@ -222,7 +182,7 @@ impl App {
             view: ViewMode::Files,
             file_selection: 0,
             history_selection: 0,
-            history_limit: 20,
+            history_limit: HISTORY_PAGE,
             graph_visible: false,
             history_graph: String::new(),
             reflog: Vec::new(),
@@ -269,13 +229,7 @@ impl App {
             hunk_selection: 0,
             staged_hunks: false,
         };
-        app.tracking = app
-            .repository
-            .tracking()
-            .unwrap_or_else(|error| crate::model::Tracking {
-                error: Some(format!("{error:#}")),
-                ..Default::default()
-            });
+        app.load_tracking();
         app.refresh_detail();
         let mut navigation = std::mem::take(&mut app.navigation);
         navigation.remember(&app, true);
@@ -283,12 +237,8 @@ impl App {
         Ok(app)
     }
 
-    pub fn refresh(&mut self) -> Result<()> {
-        // Keep the previous snapshot intact if reading the repository fails.
-        self.state = self.repository.load_state()?;
-        if self.history_limit > 20 {
-            self.state.commits = self.repository.history(self.history_limit)?;
-        }
+    /// A broken upstream is a visible header message, never a reason to hide the repository.
+    fn load_tracking(&mut self) {
         self.tracking = self
             .repository
             .tracking()
@@ -296,9 +246,35 @@ impl App {
                 error: Some(format!("{error:#}")),
                 ..Default::default()
             });
+    }
+
+    pub fn refresh(&mut self) -> Result<()> {
+        // Keep the previous snapshot intact if reading the repository fails.
+        self.state = self
+            .repository
+            .load_state_with_history(self.history_limit)?;
+        self.load_tracking();
         if self.upstream_comparison {
             self.review_files = self.repository.upstream_files()?;
         }
+        self.revalidate_seen();
+        if self.browse_tracked {
+            self.tracked_files = self.load_tracked_files()?;
+        }
+        let files = self.displayed_files().len();
+        clamp(&mut self.file_selection, files);
+        clamp(&mut self.branch_selection, self.state.branches.len());
+        clamp(
+            &mut self.conflict_selection,
+            self.state.merge_state.conflicts.len(),
+        );
+        self.load_view_data(false)?;
+        self.refresh_detail();
+        Ok(())
+    }
+
+    /// Seen marks are content snapshots: a file whose diff changed is no longer seen.
+    fn revalidate_seen(&mut self) {
         let upstream_files = if self.seen.keys().any(|(upstream, _)| *upstream) {
             self.repository.upstream_files().unwrap_or_default()
         } else {
@@ -311,56 +287,32 @@ impl App {
             } else {
                 &self.state.files
             };
-            if let Some(file) = files.iter().find(|file| &file.path == path) {
-                let detail = if *upstream {
-                    self.repository.upstream_detail(file)
-                } else {
-                    self.repository.file_detail(file)
-                };
-                if let Ok(detail) = detail
-                    && &detail == previous
-                {
-                    valid.insert((*upstream, path.clone()), detail);
-                }
+            let Some(file) = files.iter().find(|file| &file.path == path) else {
+                continue;
+            };
+            let detail = if *upstream {
+                self.repository.upstream_detail(file)
+            } else {
+                self.repository.file_detail(file)
+            };
+            if detail.as_ref().is_ok_and(|detail| detail == previous) {
+                valid.insert((*upstream, path.clone()), previous.clone());
             }
         }
         self.seen = valid;
-        if self.browse_tracked {
-            self.tracked_files = self.load_tracked_files()?;
-        }
-        self.file_selection = self
-            .file_selection
-            .min(self.displayed_files().len().saturating_sub(1));
-        self.history_selection = self
-            .history_selection
-            .min(self.state.commits.len().saturating_sub(1));
-        self.branch_selection = self
-            .branch_selection
-            .min(self.state.branches.len().saturating_sub(1));
-        self.conflict_selection = self
-            .conflict_selection
-            .min(self.state.merge_state.conflicts.len().saturating_sub(1));
-        self.load_extra()?;
-        self.refresh_detail();
-        Ok(())
     }
 
-    fn load_extra(&mut self) -> Result<()> {
+    /// Load data only the current view needs. `refresh` already holds fresh history.
+    fn load_view_data(&mut self, reload_history: bool) -> Result<()> {
         match self.view {
-            ViewMode::Reflog => {
-                self.reflog = self.repository.reflog(self.reflog_limit)?;
-                self.reflog_selection = self
-                    .reflog_selection
-                    .min(self.reflog.len().saturating_sub(1));
-            }
+            ViewMode::Reflog => self.reflog = self.repository.reflog(self.reflog_limit)?,
             ViewMode::History => {
-                self.state.commits = self.repository.history(self.history_limit)?;
+                if reload_history {
+                    self.state.commits = self.repository.history(self.history_limit)?;
+                }
                 if self.graph_visible {
                     self.history_graph = self.repository.history_graph(self.history_limit)?;
                 }
-                self.history_selection = self
-                    .history_selection
-                    .min(self.state.commits.len().saturating_sub(1));
             }
             ViewMode::Hunks => {
                 self.hunks = if self.browse_tracked || self.upstream_comparison {
@@ -370,50 +322,20 @@ impl App {
                 } else {
                     Vec::new()
                 };
-                self.hunk_selection = self.hunk_selection.min(self.hunks.len().saturating_sub(1));
             }
-            ViewMode::Tags => {
-                self.tags = self.repository.tags()?;
-                self.tag_selection = self.tag_selection.min(self.tags.len().saturating_sub(1));
-            }
-            ViewMode::Remotes => {
-                self.remotes = self.repository.remotes()?;
-                self.remote_selection = self
-                    .remote_selection
-                    .min(self.remotes.len().saturating_sub(1));
-            }
-            ViewMode::RemoteBranches => {
-                self.remote_branches = self.repository.remote_branches()?;
-                self.remote_branch_selection = self
-                    .remote_branch_selection
-                    .min(self.remote_branches.len().saturating_sub(1));
-            }
-            ViewMode::Stashes => {
-                self.stashes = self.repository.stashes()?;
-                self.stash_selection = self
-                    .stash_selection
-                    .min(self.stashes.len().saturating_sub(1));
-            }
+            ViewMode::Tags => self.tags = self.repository.tags()?,
+            ViewMode::Remotes => self.remotes = self.repository.remotes()?,
+            ViewMode::RemoteBranches => self.remote_branches = self.repository.remote_branches()?,
+            ViewMode::Stashes => self.stashes = self.repository.stashes()?,
             ViewMode::GitHubRepositories => {
                 self.github_repositories = crate::github::repositories(self.repository.root())?;
-                self.github_repo_selection = self
-                    .github_repo_selection
-                    .min(self.github_repositories.len().saturating_sub(1));
             }
-            ViewMode::Workspaces => {
-                self.workspaces = self.repository.workspaces()?;
-                self.workspace_selection = self
-                    .workspace_selection
-                    .min(self.workspaces.len().saturating_sub(1));
-            }
+            ViewMode::Workspaces => self.workspaces = self.repository.workspaces()?,
             ViewMode::PrFiles => {
                 self.pr_files.clear();
                 if let Some(pr) = &self.review_pr {
                     self.pr_files = crate::pr_review::reviewed_files(self.repository.root(), pr)?;
                 }
-                self.pr_file_selection = self
-                    .pr_file_selection
-                    .min(self.pr_files.len().saturating_sub(1));
             }
             ViewMode::PullRequests => {
                 let selected = self
@@ -427,12 +349,19 @@ impl App {
                 {
                     self.pr_selection = index;
                 }
-                self.pr_selection = self
-                    .pr_selection
-                    .min(self.pull_requests.len().saturating_sub(1));
             }
-            _ => {}
+            ViewMode::Files | ViewMode::Branches | ViewMode::Conflicts => {}
+            ViewMode::RecentRepositories => {}
         }
+        self.clamp_selection();
+        Ok(())
+    }
+
+    /// Switch views and load what the new view shows.
+    fn enter_view(&mut self, view: ViewMode) -> Result<()> {
+        self.view = view;
+        self.load_view_data(true)?;
+        self.refresh_detail();
         Ok(())
     }
 
@@ -456,49 +385,71 @@ impl App {
         }
     }
 
+    fn selection_mut(&mut self) -> &mut usize {
+        match self.view {
+            ViewMode::RecentRepositories => &mut self.recent_selection,
+            ViewMode::PrFiles => &mut self.pr_file_selection,
+            ViewMode::Reflog => &mut self.reflog_selection,
+            ViewMode::Hunks => &mut self.hunk_selection,
+            ViewMode::Tags => &mut self.tag_selection,
+            ViewMode::Remotes => &mut self.remote_selection,
+            ViewMode::RemoteBranches => &mut self.remote_branch_selection,
+            ViewMode::Stashes => &mut self.stash_selection,
+            ViewMode::Files => &mut self.file_selection,
+            ViewMode::History => &mut self.history_selection,
+            ViewMode::Branches => &mut self.branch_selection,
+            ViewMode::Conflicts => &mut self.conflict_selection,
+            ViewMode::GitHubRepositories => &mut self.github_repo_selection,
+            ViewMode::Workspaces => &mut self.workspace_selection,
+            ViewMode::PullRequests => &mut self.pr_selection,
+        }
+    }
+
+    /// Number of entries in the current view's list.
+    pub fn list_len(&self) -> usize {
+        match self.view {
+            ViewMode::RecentRepositories => self.navigation.repositories.len(),
+            ViewMode::PrFiles => self.pr_files.len(),
+            ViewMode::Reflog => self.reflog.len(),
+            ViewMode::Hunks => self.hunks.len(),
+            ViewMode::Tags => self.tags.len(),
+            ViewMode::Remotes => self.remotes.len(),
+            ViewMode::RemoteBranches => self.remote_branches.len(),
+            ViewMode::Stashes => self.stashes.len(),
+            ViewMode::Files => self.displayed_files().len(),
+            ViewMode::History => self.state.commits.len(),
+            ViewMode::Branches => self.state.branches.len(),
+            ViewMode::Conflicts => self.state.merge_state.conflicts.len(),
+            ViewMode::GitHubRepositories => self.github_repositories.len(),
+            ViewMode::Workspaces => self.workspaces.len(),
+            ViewMode::PullRequests => self.pull_requests.len(),
+        }
+    }
+
+    fn clamp_selection(&mut self) {
+        let len = self.list_len();
+        clamp(self.selection_mut(), len);
+    }
+
     fn move_selection(&mut self, delta: isize) {
-        let file_len = self.displayed_files().len();
-        let (selection, len) = match self.view {
-            ViewMode::RecentRepositories => (
-                &mut self.recent_selection,
-                self.navigation.repositories.len(),
-            ),
-            ViewMode::PrFiles => (&mut self.pr_file_selection, self.pr_files.len()),
-            ViewMode::Reflog => (&mut self.reflog_selection, self.reflog.len()),
-            ViewMode::Hunks => (&mut self.hunk_selection, self.hunks.len()),
-            ViewMode::Tags => (&mut self.tag_selection, self.tags.len()),
-            ViewMode::Remotes => (&mut self.remote_selection, self.remotes.len()),
-            ViewMode::RemoteBranches => (
-                &mut self.remote_branch_selection,
-                self.remote_branches.len(),
-            ),
-            ViewMode::Stashes => (&mut self.stash_selection, self.stashes.len()),
-            ViewMode::Files => (&mut self.file_selection, file_len),
-            ViewMode::History => (&mut self.history_selection, self.state.commits.len()),
-            ViewMode::Branches => (&mut self.branch_selection, self.state.branches.len()),
-            ViewMode::GitHubRepositories => (
-                &mut self.github_repo_selection,
-                self.github_repositories.len(),
-            ),
-            ViewMode::Workspaces => (&mut self.workspace_selection, self.workspaces.len()),
-            ViewMode::PullRequests => (&mut self.pr_selection, self.pull_requests.len()),
-            ViewMode::Conflicts => (
-                &mut self.conflict_selection,
-                self.state.merge_state.conflicts.len(),
-            ),
-        };
-        *selection = selection
-            .saturating_add_signed(delta)
-            .min(len.saturating_sub(1));
+        let selection = self.selection_mut();
+        *selection = selection.saturating_add_signed(delta);
+        self.clamp_selection();
         self.refresh_detail();
     }
 
-    fn refresh_detail(&mut self) {
+    /// Replace the detail pane and start reading it from the top-left corner.
+    fn set_detail(&mut self, text: String) {
+        self.detail_text = text;
         self.detail_scroll = 0;
         self.detail_column = 0;
-        self.detail_text = self
+    }
+
+    fn refresh_detail(&mut self) {
+        let detail = self
             .selected_detail()
             .unwrap_or_else(|error| format!("Cannot load details:\n{error:#}"));
+        self.set_detail(detail);
         if self.view == ViewMode::History
             && self.graph_visible
             && let Some(line) = self
@@ -507,92 +458,6 @@ impl App {
                 .position(|line| line.starts_with("> "))
         {
             self.detail_scroll = line.saturating_sub(3).min(u16::MAX as usize) as u16;
-        }
-    }
-
-    fn selected_detail(&self) -> Result<String> {
-        match self.view {
-            ViewMode::RecentRepositories => match self.navigation.repositories.get(self.recent_selection) {
-                Some(settings) => Ok(format!("{}\nSaved view: {:?}\nEnter opens this working tree; O opens another path.\nD forgets this entry without deleting any files.", display_path(&settings.root.path()?), settings.view)),
-                None => Ok("No recent repositories; O opens a local repository.".into()),
-            },
-            ViewMode::PrFiles => match (self.review_pr.as_ref(), self.pr_files.get(self.pr_file_selection)) {
-                (Some(pr), Some(file)) => file.detail(pr),
-                _ => Ok("No PR file selected; use i in PullRequests to load reviewed files.".into()),
-            },
-            ViewMode::Reflog => match self.reflog.get(self.reflog_selection) {
-                Some(entry) => self.repository.commit_detail(&crate::model::CommitEntry { sha: entry.sha.clone(), short_sha: String::new(), date: String::new(), author: String::new(), subject: entry.subject.clone() }),
-                None => Ok("No reflog entry selected".into()),
-            },
-            ViewMode::Hunks => Ok(self.hunks.get(self.hunk_selection).map(|hunk| format!("{} hunk {}/{}\n{}\n\n{}", if hunk.staged { "Staged" } else { "Unstaged" }, self.hunk_selection + 1, self.hunks.len(), display_path(&hunk.file.path), String::from_utf8_lossy(&hunk.patch))).unwrap_or_else(|| "No text hunks. d switches staged/unstaged. Use full-file staging for untracked, binary, rename or mode changes.".into())),
-            ViewMode::Tags => match self.tags.get(self.tag_selection) {
-                Some(tag) => Ok(format!("{} ({})\n{}\n\n{}", tag.name, tag.kind, tag.sha, self.repository.tag_detail(tag)?)),
-                None => Ok("No tags; N creates one.".into()),
-            },
-            ViewMode::Remotes => Ok(self.remotes.get(self.remote_selection).map(|r| format!("{}\nFetch URLs:\n{}\nPush URLs:\n{}", r.name, r.fetch_urls, r.push_urls)).unwrap_or_else(|| "No remotes. N adds one.".into())),
-            ViewMode::RemoteBranches => Ok(self.remote_branches.get(self.remote_branch_selection).map(|b| format!("{b}\nEnter creates a tracking local branch; U sets current upstream.")).unwrap_or_else(|| "No remote branches; fetch first.".into())),
-            ViewMode::Stashes => match self.stashes.get(self.stash_selection) {
-                Some(stash) => Ok(format!("{} {}\n{}\n\n{}", stash.selector, stash.subject, stash.sha, self.repository.stash_detail(stash)?)),
-                None => Ok("No stashes. S saves tracked and untracked changes.".into()),
-            },
-            ViewMode::GitHubRepositories => Ok(self.github_repositories.get(self.github_repo_selection).map(|r| format!("{}\n{}\nPrivate: {}\nEnter clone and open", r.name_with_owner, r.url, r.is_private)).unwrap_or_else(|| "No GitHub repositories".into())),
-            ViewMode::Workspaces => Ok(self.workspaces.get(self.workspace_selection).map(|w| format!("{}\nBranch: {}\nLocked: {}\nEnter open | N create | D remove", display_path(&w.path), w.branch, w.locked)).unwrap_or_else(|| "No workspace".into())),
-            ViewMode::PullRequests => match self.pull_requests.get(self.pr_selection) {
-                Some(pr) => Ok(format!("{}\n{}", crate::github::detail(self.repository.root(), pr.number)?, crate::pr_review::comments(self.repository.root(), pr.number)?)),
-                None => Ok("No open pull requests. N creates a draft PR; authenticate with gh auth login outside the TUI.".into()),
-            },
-            ViewMode::Files => match self.displayed_files().get(self.file_selection) {
-                Some(file) if self.file_detail != FileDetail::Diff => {
-                    let path = file.original_path.as_deref().unwrap_or(&file.path);
-                    let (label, text) = if self.file_detail == FileDetail::History {
-                        ("File history at HEAD (up to 100 commits; follows renames)", self.repository.file_history(path, 100)?)
-                    } else {
-                        ("Line authorship at HEAD (pending edits excluded)", self.repository.file_blame(path)?)
-                    };
-                    Ok(format!("{label}: {}\n\n{text}", display_path(path)))
-                }
-                Some(file) if self.browse_tracked => self.repository.file_contents(&file.path),
-                Some(file) if self.upstream_comparison => self.repository.upstream_detail(file),
-                Some(file) => self.repository.file_detail(file),
-                None => Ok("No files selected".to_owned()),
-            },
-            ViewMode::History if self.graph_visible => {
-                let selected = self.state.commits.get(self.history_selection).map(|c| c.sha.as_str());
-                Ok(self.history_graph.lines().map(|line| format!("{}{}", if selected.is_some_and(|sha| line.contains(sha)) { "> " } else { "  " }, line)).collect::<Vec<_>>().join("\n"))
-            }
-            ViewMode::History => match self.state.commits.get(self.history_selection) {
-                Some(commit) => self.repository.commit_detail(commit),
-                None => Ok("No commit selected".to_owned()),
-            },
-            ViewMode::Branches => Ok(match self.state.branches.get(self.branch_selection) {
-                Some(branch) if branch.current => format!("Current branch: {}", branch.name),
-                Some(branch) => format!(
-                    "Branch: {}\n\nPress Enter to switch to this branch.",
-                    branch.name
-                ),
-                None => "No branch selected".to_owned(),
-            }),
-            ViewMode::Conflicts => {
-                let header = self.state.merge_state.summary();
-                let help =
-                    "Keys: o ours | t theirs | a mark resolved | e continue | K skip | x abort";
-                match self
-                    .state
-                    .merge_state
-                    .conflicts
-                    .get(self.conflict_selection)
-                {
-                    Some(path) => Ok(format!(
-                        "{header}\n\nConflict: {}\n\n{}\n\n{help}",
-                        display_path(path),
-                        self.repository.conflict_detail(path)?
-                    )),
-                    None => Ok(format!(
-                        "{header}\n\nNo conflicted file selected.\n\n{help}\n\n{}",
-                        if self.state.merge_state.am_in_progress { self.repository.current_mail_patch()? } else { String::new() }
-                    )),
-                }
-            }
         }
     }
 
@@ -627,6 +492,19 @@ impl App {
             .contains_key(&(self.upstream_comparison, file.path.clone()))
     }
 
+    /// Record a successful outcome in the action line.
+    fn notify(&mut self, message: impl Into<String>) {
+        self.message = message.into();
+        self.message_is_error = false;
+    }
+
+    /// Git failures are recoverable UI messages, not reasons to leave the terminal in raw mode.
+    fn fail(&mut self, error: anyhow::Error) {
+        self.message = format!("{error:#}");
+        self.set_detail(format!("Action failed\n\n{}", self.message));
+        self.message_is_error = true;
+    }
+
     pub fn handle_paste(&mut self, text: &str) {
         self.palette_selection = 0;
         let target = if let Some(prompt) = &mut self.prompt {
@@ -637,7 +515,7 @@ impl App {
             None
         };
         if let Some(target) = target {
-            if target.len().saturating_add(text.len()) > 64 * 1024 {
+            if target.len().saturating_add(text.len()) > INPUT_LIMIT {
                 self.message = "Input exceeds 64 KiB; clear or shorten the field".into();
                 self.message_is_error = true;
                 return;
@@ -650,6 +528,32 @@ impl App {
         if key.kind != KeyEventKind::Press {
             return;
         }
+        if self.prompt.is_some() {
+            self.handle_prompt_key(key);
+        } else if self.searching
+            && !key
+                .modifiers
+                .intersects(KeyModifiers::CONTROL | KeyModifiers::ALT)
+        {
+            match key.code {
+                KeyCode::Esc => self.searching = false,
+                KeyCode::Enter => {
+                    self.searching = false;
+                    self.find_match(false);
+                }
+                KeyCode::Backspace => {
+                    self.search.pop();
+                }
+                KeyCode::Char(c) => self.search.push(c),
+                _ => {}
+            }
+        } else if let Some(action) = crate::input::action_for_key(key) {
+            self.handle(action);
+        }
+    }
+
+    /// Ordinary shortcut letters are text while a form is open; only control keys act.
+    fn handle_prompt_key(&mut self, key: KeyEvent) {
         if self
             .prompt
             .as_ref()
@@ -673,92 +577,33 @@ impl App {
                 _ => {}
             }
         }
-        if self.prompt.is_some() {
-            if key.modifiers == KeyModifiers::CONTROL && key.code == KeyCode::Char('c') {
-                self.running = false;
-                return;
-            }
-            if key.code == KeyCode::Char('u') && key.modifiers == KeyModifiers::CONTROL {
-                self.prompt.as_mut().unwrap().text.clear();
-                return;
-            }
-            if key.code == KeyCode::Enter && key.modifiers == KeyModifiers::ALT {
-                self.prompt.as_mut().unwrap().text.push('\n');
-                return;
-            }
-            if key
+        let control = key.modifiers == KeyModifiers::CONTROL;
+        let prompt = self.prompt.as_mut().unwrap();
+        match key.code {
+            KeyCode::Char('c') if control => self.running = false,
+            KeyCode::Char('u') if control => prompt.text.clear(),
+            KeyCode::Enter if key.modifiers == KeyModifiers::ALT => prompt.text.push('\n'),
+            _ if key
                 .modifiers
-                .intersects(KeyModifiers::CONTROL | KeyModifiers::ALT)
-            {
-                return;
+                .intersects(KeyModifiers::CONTROL | KeyModifiers::ALT) => {}
+            KeyCode::Esc => self.prompt = None,
+            KeyCode::Char(c) => prompt.text.push(c),
+            KeyCode::Backspace => {
+                prompt.text.pop();
             }
-            if key.code == KeyCode::Esc {
-                self.prompt = None;
-                return;
-            }
-            let prompt = self.prompt.as_mut().unwrap();
-            match key.code {
-                KeyCode::Char(c) => prompt.text.push(c),
-                KeyCode::Backspace => {
-                    prompt.text.pop();
-                }
-                KeyCode::Enter => {
-                    prompt.values.push(std::mem::take(&mut prompt.text));
-                    if prompt.values.len() < prompt.labels.len() {
-                        prompt.text = prompt
-                            .defaults
-                            .get(prompt.values.len())
-                            .cloned()
-                            .unwrap_or_default();
-                    }
-                    if prompt.values.len() == prompt.labels.len() {
-                        let prompt = self.prompt.take().unwrap();
-                        if let Err(error) = self.submit_prompt(prompt) {
-                            self.detail_scroll = 0;
-                            self.detail_column = 0;
-                            self.message = format!("{error:#}");
-                            self.detail_text = format!("Action failed\n\n{}", self.message);
-                            self.message_is_error = true;
-                        }
+            KeyCode::Enter => {
+                if prompt.advance() {
+                    let prompt = self.prompt.take().unwrap();
+                    if let Err(error) = self.submit_prompt(prompt) {
+                        self.fail(error);
                     }
                 }
-                _ => {}
             }
-            return;
-        }
-        if self.searching
-            && !key
-                .modifiers
-                .intersects(KeyModifiers::CONTROL | KeyModifiers::ALT)
-        {
-            match key.code {
-                KeyCode::Esc => self.searching = false,
-                KeyCode::Enter => {
-                    self.searching = false;
-                    self.find_match(false);
-                }
-                KeyCode::Backspace => {
-                    self.search.pop();
-                }
-                KeyCode::Char(c) => self.search.push(c),
-                _ => {}
-            }
-        } else if let Some(action) = crate::input::action_for_key(key) {
-            self.handle(action);
+            _ => {}
         }
     }
 
-    fn start_prompt(&mut self, kind: PromptKind, labels: Vec<&'static str>) {
-        self.prompt = Some(Prompt {
-            kind,
-            labels,
-            values: Vec::new(),
-            text: String::new(),
-            defaults: Vec::new(),
-        });
-    }
-
-    fn open_repository(&mut self, path: &std::path::Path) -> Result<()> {
+    fn open_repository(&mut self, path: &Path) -> Result<()> {
         // Construct first: a failed open leaves the existing repository intact.
         let mut replacement = Self::new(Repository::open(path)?)?;
         let mut navigation = self.navigation.clone();
@@ -775,1097 +620,39 @@ impl App {
         Ok(())
     }
 
-    fn start_prefilled_prompt(
-        &mut self,
-        kind: PromptKind,
-        labels: Vec<&'static str>,
-        defaults: Vec<String>,
-    ) {
-        self.start_prompt(kind, labels);
-        if let Some(prompt) = &mut self.prompt {
-            prompt.text = defaults.first().cloned().unwrap_or_default();
-            prompt.defaults = defaults;
-        }
-    }
-
-    fn submit_prompt(&mut self, prompt: Prompt) -> Result<()> {
-        use anyhow::ensure;
-        let v = prompt.values;
-        let output = match prompt.kind {
-            PromptKind::CommandPalette => {
-                let entries = crate::commands::filtered(self.view, &v[0]);
-                let entry = entries
-                    .get(self.palette_selection)
-                    .context("No matching command; open the palette and change the search")?;
-                if let Some(view) = entry.view {
-                    self.view = view;
-                }
-                return self.apply(entry.action);
-            }
-            PromptKind::ImportPatch => {
-                ensure!(v[1] == "apply", "Import cancelled: type apply exactly");
-                let result = self
-                    .repository
-                    .import_mail_patch(std::path::Path::new(&v[0]));
-                let refreshed = self.refresh();
-                if self.state.merge_state.am_in_progress {
-                    self.view = ViewMode::Conflicts;
-                    self.refresh_detail();
-                }
-                result?;
-                refreshed?;
-                "Imported mail patch".into()
-            }
-
-            PromptKind::ExportCommit(sha) => {
-                let path = self
-                    .repository
-                    .export_commit(&sha, std::path::Path::new(&v[0]))?;
-                format!("Exported mail patch {}", display_path(&path))
-            }
-
-            PromptKind::FilterPr => {
-                let filter = crate::github::PrFilter {
-                    state: v[0].trim().into(),
-                    search: v[1].clone(),
-                    limit: 100,
-                };
-                filter.validate()?;
-                let prs = crate::github::list_filtered(self.repository.root(), &filter)?;
-                self.pr_filter = filter;
-                self.pull_requests = prs;
-                self.pr_selection = 0;
-                "Updated PR filter".into()
-            }
-            PromptKind::EditPr(expected) => {
-                crate::github::edit(self.repository.root(), &expected, &v[0], &v[1], &v[2])?
-            }
-            PromptKind::ReadyPr(pr) => {
-                ensure!(
-                    v[0] == pr.number.to_string(),
-                    "Draft transition cancelled: confirm PR number"
-                );
-                crate::github::set_ready(self.repository.root(), &pr)?
-            }
-            PromptKind::InlinePr(pr, file) => crate::pr_review::inline_comment(
-                self.repository.root(),
-                &pr,
-                &file,
-                v[0].trim(),
-                v[1].trim()
-                    .parse()
-                    .context("Enter a positive diff line number")?,
-                &v[2],
-            )?,
-            PromptKind::RecoverCommit(sha) => {
-                self.repository.recover_commit(&sha, &v[0])?;
-                format!("Recovered {} into branch {}; checkout unchanged", sha, v[0])
-            }
-            PromptKind::ResetCommit(request) => {
-                let mode = crate::git::ResetMode::parse(v[0].trim())?;
-                ensure!(
-                    v[1] == request.target,
-                    "Reset cancelled: confirm full target commit ID"
-                );
-                let result = self.repository.reset_commit(&request, mode);
-                let refreshed = self.refresh();
-                let recovery = result?;
-                refreshed?;
-                format!(
-                    "Reset {} to {}; previous HEAD saved as {}",
-                    v[0], request.target, recovery
-                )
-            }
-            PromptKind::ApplyCommit(sha, revert) => {
-                ensure!(
-                    v[0] == sha,
-                    "Commit operation cancelled: confirm full commit ID"
-                );
-                let mainline = if v[1].trim().is_empty() {
-                    None
-                } else {
-                    Some(
-                        v[1].trim()
-                            .parse::<usize>()
-                            .context("Mainline must be a parent number")?,
-                    )
-                };
-                self.run_action(
-                    |repo| repo.apply_commit(&sha, revert, mainline),
-                    if revert {
-                        "Reverted commit"
-                    } else {
-                        "Cherry-picked commit"
-                    },
-                )?;
-                self.message.clone()
-            }
-            PromptKind::RestoreFile(request) => {
-                ensure!(v[0] == "discard", "Discard cancelled");
-                let result = self.repository.restore_file(&request);
-                let refreshed = self.refresh();
-                result?;
-                refreshed?;
-                "Restored selected file".into()
-            }
-            PromptKind::CreateTag => {
-                self.repository.create_tag(&v[0], &v[1], &v[2])?;
-                "Created tag".into()
-            }
-            PromptKind::DeleteTag(tag) => {
-                ensure!(v[0] == "delete", "Tag deletion cancelled");
-                self.repository.delete_tag(&tag)?;
-                "Deleted selected local tag".into()
-            }
-            PromptKind::PublishTag(tag) => {
-                self.repository.publish_tag(&tag, &v[0])?;
-                "Published selected tag".into()
-            }
-            PromptKind::DeleteRemoteTag(tag) => {
-                ensure!(v[1] == "delete", "Remote tag deletion cancelled");
-                self.repository.delete_remote_tag(&tag, &v[0])?;
-                "Deleted remote tag; local tag retained".into()
-            }
-
-            PromptKind::AddRemote => {
-                self.repository.add_remote(&v[0], &v[1])?;
-                "Added remote".into()
-            }
-            PromptKind::EditPushUrl(name) => {
-                self.repository.edit_push_url(&name, &v[0])?;
-                "Updated push URL".into()
-            }
-            PromptKind::EditRemote(name) => {
-                self.repository.edit_remote(&name, &v[0])?;
-                "Updated fetch URL".into()
-            }
-            PromptKind::RemoveRemote(name) => {
-                ensure!(v[0] == "remove", "Remote removal cancelled");
-                self.repository.remove_remote(&name)?;
-                "Removed remote".into()
-            }
-            PromptKind::CheckoutRemote(reference) => {
-                self.repository.checkout_remote(&reference, &v[0])?;
-                "Checked out tracking branch".into()
-            }
-            PromptKind::SetUpstream => {
-                self.repository.set_upstream(&v[0])?;
-                "Updated upstream".into()
-            }
-            PromptKind::PublishBranch => {
-                let result = self.repository.publish_branch(&v[0]);
-                let refreshed = self.refresh();
-                result?;
-                refreshed?;
-                "Published current branch and set upstream".into()
-            }
-            PromptKind::PullStrategy => {
-                let result = self.repository.pull_strategy(&v[0]);
-                let refreshed = self.refresh();
-                result?;
-                refreshed?;
-                "Pulled changes".into()
-            }
-
-            PromptKind::SaveStash => {
-                let result = self.repository.save_stash(&v[0]);
-                let refreshed = self.refresh();
-                result?;
-                refreshed?;
-                "Saved stash including untracked files".into()
-            }
-            PromptKind::ApplyStash(stash, pop) => {
-                ensure!(
-                    v[0] == if pop { "pop" } else { "apply" },
-                    "Stash operation cancelled"
-                );
-                let result = self.repository.apply_stash(&stash, pop);
-                let refreshed = self.refresh();
-                result?;
-                refreshed?;
-                if pop {
-                    "Applied and removed stash".into()
-                } else {
-                    "Applied stash; entry retained".into()
-                }
-            }
-            PromptKind::DropStash(stash) => {
-                ensure!(v[0] == "drop", "Drop cancelled: type drop exactly");
-                self.repository.drop_stash(&stash)?;
-                "Dropped selected stash".into()
-            }
-
-            PromptKind::Commit(amend) => {
-                // Reload after hooks even when they fail, preserving partial state changes.
-                let result = if amend {
-                    self.repository.amend(&v[0])
-                } else {
-                    self.repository.commit(&v[0])
-                };
-                let refreshed = self.refresh();
-                result?;
-                refreshed?;
-                "Committed changes".into()
-            }
-            PromptKind::Branch => {
-                self.repository.switch_or_create_branch(&v[0])?;
-                "Switched branch".into()
-            }
-            PromptKind::RenameBranch(name) => {
-                self.repository.rename_branch(&name, &v[0])?;
-                "Renamed branch".into()
-            }
-            PromptKind::DeleteBranch(name) => {
-                ensure!(v[0] == "delete", "Deletion cancelled: type delete exactly");
-                self.repository.delete_branch(&name)?;
-                "Deleted merged branch".into()
-            }
-            PromptKind::IntegrateBranch(name, rebase) => {
-                ensure!(
-                    v[0] == if rebase { "rebase" } else { "merge" },
-                    "Operation cancelled: confirmation does not match"
-                );
-                let result = self.repository.integrate_branch(&name, rebase);
-                let refreshed = self.refresh();
-                result?;
-                refreshed?;
-                "Branch integrated".into()
-            }
-
-            PromptKind::InitializeRepository => {
-                let repository = Repository::initialize(
-                    self.repository.root(),
-                    std::path::Path::new(&v[0]),
-                    &v[1],
-                )?;
-                return self.open_repository(repository.root());
-            }
-            PromptKind::CloneGitRepository => {
-                let repository = Repository::clone_into(
-                    self.repository.root(),
-                    std::ffi::OsStr::new(&v[0]),
-                    std::path::Path::new(&v[1]),
-                )?;
-                return self.open_repository(repository.root());
-            }
-            PromptKind::CloneRepository(name) => {
-                let path = PathBuf::from(&v[0]);
-                let path = if path.is_absolute() {
-                    path
-                } else {
-                    self.repository.root().join(path)
-                };
-                crate::github::clone_repository(self.repository.root(), &name, &path)?;
-                return self.open_repository(&path);
-            }
-            PromptKind::Workspace => {
-                self.repository
-                    .create_workspace(std::path::Path::new(&v[0]), &v[1])?;
-                "Workspace created".into()
-            }
-            PromptKind::OpenRepository => {
-                let path = PathBuf::from(&v[0]);
-                let path = if path.is_absolute() {
-                    path
-                } else {
-                    self.repository.root().join(path)
-                };
-                return self.open_repository(&path);
-            }
-            PromptKind::Remove(w) => {
-                ensure!(v[0] == "remove", "Removal cancelled: type remove exactly");
-                self.repository.remove_workspace(&w)?;
-                "Workspace removed; branch retained".into()
-            }
-            PromptKind::CreatePr => {
-                self.repository.ensure_clean()?;
-                crate::github::create(self.repository.root(), &v[0], &v[1], &v[2], &v[3])?
-            }
-            PromptKind::Merge(pr) => {
-                ensure!(
-                    v[0] == pr.number.to_string(),
-                    "Merge cancelled: enter the selected PR number"
-                );
-                crate::github::merge_with_method(
-                    self.repository.root(),
-                    &pr,
-                    crate::github::MergeMethod::parse(v[1].trim())?,
-                )?
-            }
-            PromptKind::Review(pr, verdict) => {
-                crate::github::review_selected(self.repository.root(), &pr, verdict, &v[0])?
-            }
-            PromptKind::Comment(number) => {
-                crate::github::comment(self.repository.root(), number, &v[0])?
-            }
-        };
-        // Preserve the operation result even if a network refresh then fails.
-        let refreshed = self.refresh();
-        self.message = if let Err(error) = refreshed {
-            format!("{output}\nRefresh failed: {error:#}")
-        } else {
-            output
-        };
-        self.message_is_error = false;
-        Ok(())
-    }
-
-    fn find_match(&mut self, next: bool) {
-        if self.search.is_empty() {
-            return;
-        }
-        if self.view == ViewMode::History {
-            let len = self.state.commits.len();
-            let start = if next {
-                self.history_selection.saturating_add(1)
-            } else {
-                0
-            };
-            let found = (start..len).chain(0..start.min(len)).find(|index| {
-                let c = &self.state.commits[*index];
-                [&c.sha, &c.subject, &c.author, &c.date]
-                    .iter()
-                    .any(|value| value.contains(&self.search))
-            });
-            if let Some(index) = found {
-                self.history_selection = index;
-                self.refresh_detail();
-            }
-            self.message = if found.is_some() {
-                format!("History match: {}", self.search)
-            } else {
-                format!(
-                    "No loaded history match: {} (use + to load older commits)",
-                    self.search
-                )
-            };
-            return;
-        }
-        let start = if next {
-            usize::from(self.detail_scroll) + 1
-        } else {
-            0
-        };
-        let lines: Vec<_> = self.detail_text.lines().collect();
-        let found = (start..lines.len())
-            .chain(0..start.min(lines.len()))
-            .find(|index| lines[*index].contains(&self.search));
-        self.detail_column = 0;
-        if let Some(line) = found {
-            self.detail_scroll = line.min(u16::MAX as usize) as u16;
-        }
-        self.message = if found.is_some() {
-            format!("Find: {}", self.search)
-        } else {
-            format!("No match: {}", self.search)
-        };
-    }
-
-    /// Git failures are recoverable UI messages, not reasons to leave the terminal in raw mode.
     pub fn handle(&mut self, action: Action) {
         if let Err(error) = self.apply(action) {
-            self.detail_scroll = 0;
-            self.message = format!("{error:#}");
-            self.detail_text = format!("Action failed\n\n{}", self.message);
-            self.message_is_error = true;
+            self.fail(error);
         }
     }
 
-    fn apply(&mut self, action: Action) -> Result<()> {
-        if self.view == ViewMode::Files && self.browse_tracked && action == Action::OpenHunks {
-            self.message = "Return to working changes before selecting editable hunks".into();
-            return Ok(());
-        }
-        if self.view == ViewMode::Files
-            && (self.browse_tracked || self.file_detail != FileDetail::Diff)
-            && matches!(
-                action,
-                Action::Stage
-                    | Action::Unstage
-                    | Action::Remove
-                    | Action::RestoreFromIndex
-                    | Action::ToggleSeen
-            )
-        {
-            self.message = "File inspection is read-only; return to working changes first".into();
-            return Ok(());
-        }
-        match action {
-            Action::CommandPalette => {
-                self.palette_selection = 0;
-                self.start_prompt(PromptKind::CommandPalette, vec!["Command search"]);
-            }
-            Action::ImportPatch => self.start_prompt(
-                PromptKind::ImportPatch,
-                vec!["Mail patch file", "Type apply to import commits"],
-            ),
-            Action::New if self.view == ViewMode::RecentRepositories => self
-                .start_prefilled_prompt(
-                    PromptKind::InitializeRepository,
-                    vec!["New repository path", "Initial branch"],
-                    vec![String::new(), "main".into()],
-                ),
-            Action::CommentPr if self.view == ViewMode::RecentRepositories => self.start_prompt(
-                PromptKind::CloneGitRepository,
-                vec![
-                    "Git URL or local source path",
-                    "Clone destination (empty or new directory)",
-                ],
-            ),
-            Action::RecentRepositories => {
-                self.capture_navigation();
-                self.view = ViewMode::RecentRepositories;
-                self.recent_selection = 0;
-                self.refresh_detail();
-            }
-            Action::SwitchBranch if self.view == ViewMode::RecentRepositories => {
-                if let Some(settings) = self.navigation.repositories.get(self.recent_selection) {
-                    let path = settings.root.path()?;
-                    self.open_repository(&path)?;
-                }
-            }
-            Action::Remove if self.view == ViewMode::RecentRepositories => {
-                if self.recent_selection < self.navigation.repositories.len() {
-                    self.navigation.repositories.remove(self.recent_selection);
-                    self.recent_selection = self
-                        .recent_selection
-                        .min(self.navigation.repositories.len().saturating_sub(1));
-                    self.refresh_detail();
-                    self.message = "Forgot recent entry; working tree remains on disk".into();
-                    self.message_is_error = false;
-                }
-            }
-            Action::LoadHistory if self.view == ViewMode::PullRequests => {
-                self.pr_filter.limit = self.pr_filter.limit.saturating_add(100);
-                self.load_extra()?;
-                self.refresh_detail();
-                self.message = format!(
-                    "Loaded {} PRs (limit {}); search may be capped by GitHub, refine U filter",
-                    self.pull_requests.len(),
-                    self.pr_filter.limit
-                );
-                self.message_is_error = false;
-            }
-            Action::SetUpstream if self.view == ViewMode::PullRequests => self
-                .start_prefilled_prompt(
-                    PromptKind::FilterPr,
-                    vec![
-                        "PR state: open, closed, merged, all",
-                        "GitHub search query (blank = none)",
-                    ],
-                    vec![self.pr_filter.state.clone(), self.pr_filter.search.clone()],
-                ),
-            Action::EditRemote if self.view == ViewMode::PullRequests => {
-                if let Some(pr) = self.pull_requests.get(self.pr_selection) {
-                    let expected = crate::github::editable(self.repository.root(), pr.number)?;
-                    self.message = format!("Edit PR #{}: {}", pr.number, pr.url);
-                    let defaults = vec![
-                        expected.title.clone(),
-                        expected.body.clone(),
-                        expected.base_ref_name.clone(),
-                    ];
-                    self.start_prefilled_prompt(
-                        PromptKind::EditPr(expected),
-                        vec![
-                            "PR title",
-                            "PR body (Ctrl-U clears; Alt-Enter newline; paste supported)",
-                            "Base branch",
-                        ],
-                        defaults,
-                    );
-                }
-            }
-            Action::PopStash if self.view == ViewMode::PullRequests => {
-                if let Some(pr) = self.pull_requests.get(self.pr_selection).cloned() {
-                    self.message = format!(
-                        "PR #{} {}: {}",
-                        pr.number,
-                        if pr.is_draft {
-                            "draft -> ready"
-                        } else {
-                            "ready -> draft"
-                        },
-                        pr.url
-                    );
-                    self.start_prompt(
-                        PromptKind::ReadyPr(pr),
-                        vec!["Type selected PR number to confirm draft transition"],
-                    );
-                }
-            }
-            Action::OpenHunks if self.view == ViewMode::PullRequests => {
-                if let Some(pr) = self.pull_requests.get(self.pr_selection).cloned() {
-                    self.review_pr = Some(pr);
-                    self.pr_files.clear();
-                    self.pr_file_selection = 0;
-                    self.view = ViewMode::PrFiles;
-                    self.load_extra()?;
-                    self.refresh_detail();
-                }
-            }
-            Action::CommentPr if self.view == ViewMode::PrFiles => {
-                if let (Some(pr), Some(file)) = (
-                    self.review_pr.as_ref(),
-                    self.pr_files.get(self.pr_file_selection),
-                ) {
-                    self.message = format!(
-                        "Comment PR #{} {} at reviewed head {}",
-                        pr.number,
-                        file.filename.escape_debug(),
-                        pr.head_ref_oid
-                    );
-                    self.start_prompt(
-                        PromptKind::InlinePr(pr.clone(), file.clone()),
-                        vec![
-                            "Diff side: LEFT or RIGHT",
-                            "Displayed old/new line number",
-                            "Inline comment body",
-                        ],
-                    );
-                }
-            }
-            Action::BrowseTracked if self.view == ViewMode::Files => {
-                self.browse_tracked = !self.browse_tracked;
-                self.upstream_comparison = false;
-                self.file_detail = FileDetail::Diff;
-                self.file_selection = 0;
-                self.tracked_files = if self.browse_tracked {
-                    self.load_tracked_files()?
-                } else {
-                    Vec::new()
-                };
-                self.refresh_detail();
-                self.message = if self.browse_tracked {
-                    "Browsing tracked files (read-only)"
-                } else {
-                    "Working changes"
-                }
-                .into();
-            }
-            Action::ExportCommit if self.view == ViewMode::History => {
-                if let Some(commit) = self.state.commits.get(self.history_selection) {
-                    self.start_prompt(
-                        PromptKind::ExportCommit(commit.sha.clone()),
-                        vec!["New mail patch destination (existing files refused)"],
-                    );
-                }
-            }
-            Action::FileHistory | Action::FileBlame if self.view == ViewMode::Files => {
-                let mode = if action == Action::FileHistory {
-                    FileDetail::History
-                } else {
-                    FileDetail::Blame
-                };
-                self.file_detail = if self.file_detail == mode {
-                    FileDetail::Diff
-                } else {
-                    mode
-                };
-                self.refresh_detail();
-            }
-            Action::ToggleGraph if self.view == ViewMode::History => {
-                self.graph_visible = !self.graph_visible;
-                self.load_extra()?;
-                self.refresh_detail();
-            }
-            Action::New if self.view == ViewMode::Reflog => {
-                if let Some(entry) = self.reflog.get(self.reflog_selection) {
-                    self.message = format!("Recover {}: {}", entry.sha, entry.subject);
-                    self.start_prompt(
-                        PromptKind::RecoverCommit(entry.sha.clone()),
-                        vec!["New recovery branch name (checkout unchanged)"],
-                    );
-                }
-            }
-            Action::LoadHistory if self.view == ViewMode::Reflog => {
-                self.reflog_limit = self.reflog_limit.saturating_add(100);
-                self.load_extra()?;
-                self.refresh_detail();
-                self.message = format!("Loaded {} reflog entries", self.reflog.len());
-                self.message_is_error = false;
-            }
-            Action::ResetCommit if self.view == ViewMode::History => {
-                if let Some(commit) = self.state.commits.get(self.history_selection) {
-                    let request = self.repository.prepare_reset(&commit.sha)?;
-                    self.message = format!(
-                        "Reset to {}: soft keeps index/files; mixed unstages; hard discards tracked changes",
-                        request.target
-                    );
-                    self.start_prompt(
-                        PromptKind::ResetCommit(request),
-                        vec![
-                            "Reset mode: soft, mixed, hard",
-                            "Type full target commit ID to confirm",
-                        ],
-                    );
-                }
-            }
-            Action::LoadHistory if self.view == ViewMode::History => {
-                self.history_limit = self.history_limit.saturating_add(100);
-                self.load_extra()?;
-                self.refresh_detail();
-                self.message = format!(
-                    "Loaded {} commits across branches",
-                    self.state.commits.len()
-                );
-                self.message_is_error = false;
-            }
-            Action::CherryPick | Action::RevertCommit if self.view == ViewMode::History => {
-                if let Some(commit) = self.state.commits.get(self.history_selection) {
-                    let sha = commit.sha.clone();
-                    let revert = action == Action::RevertCommit;
-                    self.message = format!(
-                        "{} {}: {}",
-                        if revert { "Revert" } else { "Cherry-pick" },
-                        commit.short_sha,
-                        commit.subject
-                    );
-                    self.start_prompt(
-                        PromptKind::ApplyCommit(sha, revert),
-                        vec![
-                            "Type full selected commit ID to confirm",
-                            "Mainline parent for merge commit (blank otherwise)",
-                        ],
-                    );
-                }
-            }
-            Action::Remove | Action::RestoreFromIndex
-                if self.view == ViewMode::Files && !self.upstream_comparison =>
-            {
-                if let Some(file) = self.state.files.get(self.file_selection) {
-                    let request = self
-                        .repository
-                        .prepare_restore(file, action == Action::Remove)?;
-                    self.message = format!(
-                        "Discard {}: {}",
-                        file.label(),
-                        if file.status == "??" {
-                            "delete untracked file"
-                        } else if request.from_head {
-                            "restore HEAD in index and working tree"
-                        } else {
-                            "restore working file from index; staged changes retained"
-                        }
-                    );
-                    self.start_prompt(
-                        PromptKind::RestoreFile(request),
-                        vec!["Type discard to confirm selected file"],
-                    );
-                }
-            }
-
-            Action::OpenHunks if self.view == ViewMode::Files && !self.upstream_comparison => {
-                self.view = ViewMode::Hunks;
-                self.hunk_selection = 0;
-                self.load_extra()?;
-                self.refresh_detail();
-            }
-            Action::ToggleComparison if self.view == ViewMode::Hunks => {
-                self.staged_hunks = !self.staged_hunks;
-                self.hunk_selection = 0;
-                self.load_extra()?;
-                self.refresh_detail();
-            }
-            Action::Stage | Action::Unstage
-                if self.view == ViewMode::Hunks && !self.upstream_comparison =>
-            {
-                if (action == Action::Unstage) == self.staged_hunks
-                    && let Some(hunk) = self.hunks.get(self.hunk_selection).cloned()
-                {
-                    self.run_action(
-                        |repo| repo.apply_hunk(&hunk),
-                        "Updated selected hunk in index",
-                    )?;
-                }
-            }
-
-            Action::New if self.view == ViewMode::Tags => self.start_prompt(
-                PromptKind::CreateTag,
-                vec![
-                    "Tag name",
-                    "Target commit (empty = HEAD)",
-                    "Annotation (empty = lightweight)",
-                ],
-            ),
-            Action::Remove | Action::PublishBranch | Action::DeleteRemoteTag
-                if self.view == ViewMode::Tags =>
-            {
-                if let Some(tag) = self.tags.get(self.tag_selection).cloned() {
-                    self.message = format!("Selected tag: {} ({})", tag.name, tag.sha);
-                    match action {
-                        Action::Remove => self.start_prompt(
-                            PromptKind::DeleteTag(tag),
-                            vec!["Type delete to remove local tag"],
-                        ),
-                        Action::PublishBranch => self.start_prompt(
-                            PromptKind::PublishTag(tag),
-                            vec!["Remote to publish selected tag"],
-                        ),
-                        _ => self.start_prompt(
-                            PromptKind::DeleteRemoteTag(tag),
-                            vec![
-                                "Remote to delete selected tag from",
-                                "Type delete to confirm remote deletion",
-                            ],
-                        ),
-                    }
-                }
-            }
-
-            Action::New if self.view == ViewMode::Remotes => {
-                self.start_prompt(PromptKind::AddRemote, vec!["Remote name", "Remote URL"])
-            }
-            Action::EditRemote | Action::EditPushUrl | Action::Remove
-                if self.view == ViewMode::Remotes =>
-            {
-                if let Some(remote) = self.remotes.get(self.remote_selection) {
-                    let name = remote.name.clone();
-                    self.message = format!("Selected remote: {name}");
-                    if action == Action::EditPushUrl {
-                        self.start_prompt(PromptKind::EditPushUrl(name), vec!["New push URL"]);
-                    } else if action == Action::EditRemote {
-                        self.start_prompt(PromptKind::EditRemote(name), vec!["New fetch URL"]);
-                    } else {
-                        self.start_prompt(
-                            PromptKind::RemoveRemote(name),
-                            vec!["Type remove to remove remote and tracking refs"],
-                        );
-                    }
-                }
-            }
-            Action::SetUpstream => self.start_prompt(
-                PromptKind::SetUpstream,
-                vec!["Upstream ref (origin/main; empty unsets)"],
-            ),
-            Action::PublishBranch => self.start_prompt(
-                PromptKind::PublishBranch,
-                vec!["Remote to publish current branch"],
-            ),
-            Action::PullStrategy => self.start_prompt(
-                PromptKind::PullStrategy,
-                vec!["Pull strategy: ff-only, merge or rebase"],
-            ),
-            Action::SwitchBranch if self.view == ViewMode::RemoteBranches => {
-                if let Some(reference) = self.remote_branches.get(self.remote_branch_selection) {
-                    self.start_prompt(
-                        PromptKind::CheckoutRemote(reference.clone()),
-                        vec!["New local tracking branch name"],
-                    );
-                }
-            }
-
-            Action::SaveStash => self.start_prompt(
-                PromptKind::SaveStash,
-                vec!["Stash message (includes untracked files)"],
-            ),
-            Action::ApplyStash | Action::PopStash | Action::Remove
-                if self.view == ViewMode::Stashes =>
-            {
-                if let Some(stash) = self.stashes.get(self.stash_selection).cloned() {
-                    self.message = format!("Selected {}: {}", stash.selector, stash.subject);
-                    match action {
-                        Action::ApplyStash => self.start_prompt(
-                            PromptKind::ApplyStash(stash, false),
-                            vec!["Type apply to restore stash and index"],
-                        ),
-                        Action::PopStash => self.start_prompt(
-                            PromptKind::ApplyStash(stash, true),
-                            vec!["Type pop to restore and remove on success"],
-                        ),
-                        _ => self.start_prompt(
-                            PromptKind::DropStash(stash),
-                            vec!["Type drop to delete selected stash"],
-                        ),
-                    }
-                }
-            }
-
-            Action::GitHubStatus => {
-                self.detail_text = crate::github::run(self.repository.root(), &["auth", "status"])?;
-                self.detail_scroll = 0;
-                self.detail_column = 0;
-            }
-            Action::SwitchBranch if self.view == ViewMode::GitHubRepositories => {
-                if let Some(repo) = self.github_repositories.get(self.github_repo_selection) {
-                    self.start_prompt(
-                        PromptKind::CloneRepository(repo.name_with_owner.clone()),
-                        vec!["Clone destination (new directory)"],
-                    );
-                }
-            }
-            Action::OpenRepository => {
-                self.start_prompt(PromptKind::OpenRepository, vec!["Repository path"])
-            }
-            Action::New if self.view == ViewMode::Workspaces => self.start_prompt(
-                PromptKind::Workspace,
-                vec![
-                    "Workspace path (relative to repo or absolute)",
-                    "New branch name",
-                ],
-            ),
-            Action::New if self.view == ViewMode::PullRequests => self.start_prompt(
-                PromptKind::CreatePr,
-                vec![
-                    "Draft PR title",
-                    "PR body",
-                    "Base branch",
-                    "Published head branch (or owner:branch)",
-                ],
-            ),
-            Action::Remove if self.view == ViewMode::Workspaces => {
-                if let Some(w) = self.workspaces.get(self.workspace_selection).cloned() {
-                    self.message = format!("Remove {}? Branch will remain.", display_path(&w.path));
-                    self.start_prompt(PromptKind::Remove(w), vec!["Type remove to confirm"]);
-                }
-            }
-            Action::MergePr | Action::ApprovePr | Action::RequestChanges | Action::CommentPr
-                if self.view == ViewMode::PullRequests =>
-            {
-                if let Some(pr) = self.pull_requests.get(self.pr_selection).cloned() {
-                    self.message = format!("Selected PR #{}: {} ({})", pr.number, pr.title, pr.url);
-                    match action {
-                        Action::MergePr => self.start_prompt(
-                            PromptKind::Merge(pr),
-                            vec![
-                                "Confirm merge: enter PR number",
-                                "Merge method: merge, squash, rebase",
-                            ],
-                        ),
-                        Action::ApprovePr => self.start_prompt(
-                            PromptKind::Review(pr, "--approve"),
-                            vec!["Approve review body"],
-                        ),
-                        Action::RequestChanges => self.start_prompt(
-                            PromptKind::Review(pr, "--request-changes"),
-                            vec!["Requested changes"],
-                        ),
-                        _ => self.start_prompt(PromptKind::Comment(pr.number), vec!["PR comment"]),
-                    }
-                }
-            }
-            Action::PrDiff if self.view == ViewMode::PullRequests => {
-                if let Some(pr) = self.pull_requests.get(self.pr_selection) {
-                    self.detail_text = crate::github::run(
-                        self.repository.root(),
-                        &["pr", "diff", &pr.number.to_string(), "--color", "never"],
-                    )?;
-                    self.detail_scroll = 0;
-                    self.detail_column = 0;
-                }
-            }
-            Action::SwitchBranch if self.view == ViewMode::Workspaces => {
-                if let Some(w) = self.workspaces.get(self.workspace_selection) {
-                    let path = w.path.clone();
-                    self.open_repository(&path)?;
-                }
-            }
-            Action::SwitchBranch if self.view == ViewMode::PullRequests => {
-                if let Some(pr) = self.pull_requests.get(self.pr_selection) {
-                    self.repository.ensure_clean()?;
-                    let number = pr.number;
-                    let result = crate::github::checkout(self.repository.root(), number);
-                    let refreshed = self.refresh();
-                    result?;
-                    refreshed?;
-                    self.message = format!("Checked out PR #{number}");
-                    self.message_is_error = false;
-                }
-            }
-            Action::ScrollLeft => self.detail_column = self.detail_column.saturating_sub(10),
-            Action::ScrollRight => {
-                self.detail_column = self.detail_column.saturating_add(10).min(
-                    self.detail_text
-                        .lines()
-                        .map(|line| line.chars().count())
-                        .max()
-                        .unwrap_or(0)
-                        .min(u16::MAX as usize) as u16,
-                )
-            }
-            Action::PageDown => {
-                self.detail_scroll = self.detail_scroll.saturating_add(10).min(
-                    self.detail_text
-                        .lines()
-                        .count()
-                        .saturating_sub(1)
-                        .min(u16::MAX as usize) as u16,
-                )
-            }
-            Action::PageUp => self.detail_scroll = self.detail_scroll.saturating_sub(10),
-            Action::Search => {
-                self.searching = true;
-                self.search.clear();
-            }
-            Action::NextMatch => self.find_match(true),
-            Action::ToggleComparison if self.view == ViewMode::Files => {
-                if !self.upstream_comparison {
-                    self.review_files = self.repository.upstream_files()?;
-                }
-                self.browse_tracked = false;
-                self.file_detail = FileDetail::Diff;
-                self.upstream_comparison = !self.upstream_comparison;
-                self.file_selection = 0;
-                self.refresh_detail();
-                self.message = if self.upstream_comparison {
-                    "Compared with upstream merge base"
-                } else {
-                    "Working changes"
-                }
-                .into();
-                self.message_is_error = false;
-            }
-            Action::ToggleSeen if self.view == ViewMode::Files => {
-                if let Some(file) = self.displayed_files().get(self.file_selection) {
-                    let key = (self.upstream_comparison, file.path.clone());
-                    if self.seen.remove(&key).is_none() {
-                        let detail = self.selected_detail()?;
-                        self.seen.insert(key, detail);
-                    }
-                }
-            }
-            Action::Quit => self.running = false,
-            Action::Refresh => {
-                self.refresh()?;
-                self.message = "Refreshed".to_owned();
-                self.message_is_error = false;
-            }
-            Action::NextView => {
-                self.view = self.view.next();
-                self.load_extra()?;
-                self.refresh_detail();
-            }
-            Action::NextItem => self.move_selection(1),
-            // Navigation must not silently skip a rebase commit in the conflicts view.
-            Action::PreviousItem => self.move_selection(-1),
-            Action::SwitchBranch if self.view == ViewMode::Branches => {
-                if let Some(branch) = self.state.branches.get(self.branch_selection).cloned() {
-                    self.run_action(
-                        |repo| repo.switch_branch(&branch.name),
-                        format!("Switched to {}", branch.name),
-                    )?;
-                }
-            }
-            Action::Stage if self.view == ViewMode::Files && !self.upstream_comparison => {
-                if let Some(file) = self.state.files.get(self.file_selection).cloned() {
-                    self.run_action(|repo| repo.stage(&file), format!("Staged {}", file.label()))?;
-                }
-            }
-            Action::Unstage if self.view == ViewMode::Files && !self.upstream_comparison => {
-                if let Some(file) = self.state.files.get(self.file_selection).cloned() {
-                    self.run_action(
-                        |repo| repo.unstage(&file),
-                        format!("Unstaged {}", file.label()),
-                    )?;
-                }
-            }
-            Action::Commit => self.start_prompt(PromptKind::Commit(false), vec!["Commit message"]),
-            Action::AmendCommit => {
-                self.message =
-                    "Amend rewrites the latest commit; enter its replacement message".into();
-                self.start_prompt(PromptKind::Commit(true), vec!["Amend commit message"]);
-            }
-            Action::Branch => {
-                self.start_prompt(PromptKind::Branch, vec!["Create or switch branch"])
-            }
-            Action::RenameBranch | Action::MergeBranch | Action::RebaseBranch | Action::Remove
-                if self.view == ViewMode::Branches =>
-            {
-                if let Some(branch) = self.state.branches.get(self.branch_selection) {
-                    let name = branch.name.clone();
-                    self.message = format!("Selected branch: {name}");
-                    match action {
-                        Action::RenameBranch => self
-                            .start_prompt(PromptKind::RenameBranch(name), vec!["New branch name"]),
-                        Action::MergeBranch => self.start_prompt(
-                            PromptKind::IntegrateBranch(name, false),
-                            vec!["Type merge to merge into the current branch"],
-                        ),
-                        Action::RebaseBranch => self.start_prompt(
-                            PromptKind::IntegrateBranch(name, true),
-                            vec!["Type rebase to rebase the current branch onto selection"],
-                        ),
-                        _ => self.start_prompt(
-                            PromptKind::DeleteBranch(name),
-                            vec!["Type delete to remove a merged branch"],
-                        ),
-                    }
-                }
-            }
-            Action::Fetch if self.view == ViewMode::Remotes => {
-                if let Some(remote) = self.remotes.get(self.remote_selection) {
-                    let name = remote.name.clone();
-                    self.run_action(|repo| repo.fetch_remote(&name), "Fetched selected remote")?;
-                }
-            }
-            Action::Fetch => self.run_action(Repository::fetch, "Fetched remotes")?,
-            Action::Pull => self.run_action(Repository::pull, "Pulled changes")?,
-            Action::Push => self.run_action(Repository::push, "Pushed changes")?,
-            Action::TakeOurs | Action::TakeTheirs if self.view == ViewMode::Conflicts => {
-                if let Some(path) = self
-                    .state
-                    .merge_state
-                    .conflicts
-                    .get(self.conflict_selection)
-                    .cloned()
-                {
-                    let side = if action == Action::TakeOurs {
-                        ConflictSide::Ours
-                    } else {
-                        ConflictSide::Theirs
-                    };
-                    self.run_action(
-                        |repo| repo.resolve_side(&path, side),
-                        format!("Resolved {} with {side:?}", display_path(&path)),
-                    )?;
-                }
-            }
-            Action::MarkResolved if self.view == ViewMode::Conflicts => {
-                if let Some(path) = self
-                    .state
-                    .merge_state
-                    .conflicts
-                    .get(self.conflict_selection)
-                    .cloned()
-                {
-                    self.run_action(
-                        |repo| repo.mark_resolved(&path),
-                        format!("Marked {} as resolved", display_path(&path)),
-                    )?;
-                }
-            }
-            Action::Continue if self.view == ViewMode::Conflicts => {
-                self.run_action(Repository::continue_operation, "Continued Git operation")?
-            }
-            Action::SkipRebase if self.view == ViewMode::Conflicts => {
-                self.run_action(Repository::skip_rebase, "Skipped current rebase commit")?
-            }
-            Action::Abort if self.view == ViewMode::Conflicts => {
-                self.run_action(Repository::abort_operation, "Aborted Git operation")?
-            }
-            _ => {}
-        }
-        Ok(())
-    }
-
+    /// Run a mutation, then reload unconditionally: a failed pull, rebase or hook can still
+    /// change files, the index or the operation state before returning an error.
     fn run_action<F>(&mut self, action: F, success: impl Into<String>) -> Result<()>
     where
         F: FnOnce(&Repository) -> Result<()>,
     {
-        let result = action(&self.repository);
-        // A failed pull/rebase/hook can still change files or the index. Always reload afterwards.
+        let result = action(&self.repository).map(|()| success.into());
+        self.finish(result)
+    }
+
+    /// Reload after an operation and report it. The operation result is preserved even when
+    /// the reload fails, so a successful push is never reported as a failure of the push.
+    fn finish(&mut self, result: Result<String>) -> Result<()> {
         let refreshed = self.refresh();
-        if let Err(error) = result {
-            return match refreshed {
-                Ok(()) => Err(error),
-                Err(refresh_error) => {
-                    Err(error.context(format!("Repository refresh also failed: {refresh_error:#}")))
-                }
-            };
+        match (result, refreshed) {
+            (Ok(success), Ok(())) => {
+                self.notify(success);
+                Ok(())
+            }
+            (Ok(success), Err(refresh_error)) => {
+                Err(refresh_error
+                    .context(format!("{success}, but refreshing the repository failed")))
+            }
+            (Err(error), Ok(())) => Err(error),
+            (Err(error), Err(refresh_error)) => {
+                Err(error.context(format!("Repository refresh also failed: {refresh_error:#}")))
+            }
         }
-        let success = success.into();
-        refreshed.with_context(|| format!("{success}, but refreshing the repository failed"))?;
-        self.message = success;
-        self.message_is_error = false;
-        Ok(())
     }
 }

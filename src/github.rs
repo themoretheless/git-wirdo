@@ -133,9 +133,9 @@ impl PrFilter {
         Ok(())
     }
 }
-pub fn list(root: &Path) -> Result<Vec<PullRequest>> {
-    list_filtered(root, &PrFilter::default())
-}
+/// The identity and head commit every PR mutation is pinned to.
+const PR_FIELDS: &str = "number,title,url,headRefName,baseRefName,headRefOid,isDraft";
+
 pub fn list_filtered(root: &Path, filter: &PrFilter) -> Result<Vec<PullRequest>> {
     filter.validate()?;
     let limit = filter.limit.to_string();
@@ -147,7 +147,7 @@ pub fn list_filtered(root: &Path, filter: &PrFilter) -> Result<Vec<PullRequest>>
         "--limit",
         &limit,
         "--json",
-        "number,title,url,headRefName,baseRefName,headRefOid,isDraft",
+        PR_FIELDS,
     ];
     if !filter.search.is_empty() {
         args.extend(["--search", &filter.search]);
@@ -157,13 +157,7 @@ pub fn list_filtered(root: &Path, filter: &PrFilter) -> Result<Vec<PullRequest>>
 pub fn get_pr(root: &Path, number: u64) -> Result<PullRequest> {
     serde_json::from_str(&run(
         root,
-        &[
-            "pr",
-            "view",
-            &number.to_string(),
-            "--json",
-            "number,title,url,headRefName,baseRefName,headRefOid,isDraft",
-        ],
+        &["pr", "view", &number.to_string(), "--json", PR_FIELDS],
     )?)
     .context("Invalid selected PR response")
 }
@@ -272,9 +266,6 @@ impl MergeMethod {
         }
     }
 }
-pub fn merge(root: &Path, pr: &PullRequest) -> Result<String> {
-    merge_with_method(root, pr, MergeMethod::Squash)
-}
 pub fn merge_with_method(root: &Path, pr: &PullRequest, method: MergeMethod) -> Result<String> {
     run(
         root,
@@ -379,17 +370,6 @@ pub fn review_selected(root: &Path, pr: &PullRequest, verdict: &str, body: &str)
     )
 }
 
-pub fn review(root: &Path, number: u64, verdict: &str, body: &str) -> Result<String> {
-    ensure!(
-        ["--approve", "--request-changes", "--comment"].contains(&verdict),
-        "Invalid review verdict"
-    );
-    run(
-        root,
-        &["pr", "review", &number.to_string(), verdict, "--body", body],
-    )
-}
-
 pub fn comment(root: &Path, number: u64, body: &str) -> Result<String> {
     ensure!(!body.trim().is_empty(), "Comment cannot be empty");
     run(
@@ -427,6 +407,44 @@ pub fn clone_repository(root: &Path, name: &str, destination: &Path) -> Result<S
         .to_str()
         .context("GitHub clone path must be UTF-8")?;
     run(root, &["repo", "clone", name, destination])
+}
+
+/// Create a repository on GitHub. With a remote name, the checkout at `root` is linked to it
+/// without pushing; publishing commits remains an explicit `W`/`P` step.
+pub fn create_repository(
+    root: &Path,
+    name: &str,
+    visibility: &str,
+    remote: &str,
+) -> Result<String> {
+    let name = name.trim();
+    ensure!(
+        !name.is_empty() && !name.starts_with('-') && !name.contains(char::is_whitespace),
+        "Repository name is required and cannot contain spaces"
+    );
+    let visibility = match visibility {
+        "private" => "--private",
+        "public" => "--public",
+        "internal" => "--internal",
+        _ => anyhow::bail!("Visibility must be private, public or internal"),
+    };
+    ensure!(
+        !remote.starts_with('-') && !remote.contains(char::is_whitespace),
+        "Remote name cannot start with - or contain spaces"
+    );
+    let mut args = vec!["repo", "create", name, visibility];
+    if !remote.is_empty() {
+        args.extend(["--source", ".", "--remote", remote]);
+    }
+    let output = run(root, &args)?;
+    Ok(if remote.is_empty() {
+        format!("Created GitHub repository {name}\n{}", output.trim())
+    } else {
+        format!(
+            "Created GitHub repository {name} as remote {remote}; publish with W or P\n{}",
+            output.trim()
+        )
+    })
 }
 
 #[cfg(test)]
@@ -664,7 +682,6 @@ mod tests {
         let root = Path::new(".");
         CAPTURE.with(|c| *c.borrow_mut() = Some(Vec::new()));
         assert!(create(root, "", "body", "main", "topic").is_err());
-        assert!(review(root, 7, "--admin", "body").is_err());
         assert!(comment(root, 7, " ").is_err());
         create(
             root,
@@ -683,11 +700,10 @@ mod tests {
             head_ref_oid: "reviewed-sha".into(),
             is_draft: false,
         };
-        merge(root, &pr).unwrap();
-        review(root, 7, "--request-changes", "Fix regression").unwrap();
+        merge_with_method(root, &pr, MergeMethod::Squash).unwrap();
         comment(root, 7, "Please check").unwrap();
         let calls = CAPTURE.with(|c| c.borrow_mut().take().unwrap());
-        assert_eq!(calls.len(), 4);
+        assert_eq!(calls.len(), 3);
         assert!(calls[0].contains(&"--draft".into()));
         assert!(calls[0].contains(&"literal $(touch unexpected); body".into()));
         assert!(calls[0].contains(&"owner:topic".into()));
@@ -702,18 +718,66 @@ mod tests {
                 "reviewed-sha"
             ]
         );
+        assert_eq!(calls[2], ["pr", "comment", "7", "--body", "Please check"]);
+    }
+
+    #[test]
+    fn repository_creation_validates_input_links_optionally_and_never_pushes() {
+        let root = Path::new(".");
+        let mock = Mock::new(["https://github.com/me/tool".into(), "created".into()]);
+        for (name, visibility, remote) in [
+            ("", "private", ""),
+            ("--admin", "private", ""),
+            ("me/tool", "secret", ""),
+            ("me tool", "private", ""),
+            ("me/tool", "private", "--push"),
+        ] {
+            assert!(create_repository(root, name, visibility, remote).is_err());
+        }
+        assert!(mock.calls().is_empty());
+        let message = create_repository(root, "me/tool", "public", "").unwrap();
+        assert_eq!(mock.calls()[0], ["repo", "create", "me/tool", "--public"]);
+        assert!(message.contains("Created GitHub repository me/tool"));
+        let message = create_repository(root, " tool ", "internal", "origin").unwrap();
         assert_eq!(
-            calls[2],
+            mock.calls()[1],
             [
-                "pr",
-                "review",
-                "7",
-                "--request-changes",
-                "--body",
-                "Fix regression"
+                "repo",
+                "create",
+                "tool",
+                "--internal",
+                "--source",
+                ".",
+                "--remote",
+                "origin"
             ]
         );
-        assert_eq!(calls[3], ["pr", "comment", "7", "--body", "Please check"]);
+        assert!(message.contains("remote origin") && !mock.calls()[1].contains(&"--push".into()));
+    }
+
+    #[test]
+    fn tui_repository_creation_requires_typed_confirmation() {
+        let (_repo, mut app) = selected_app();
+        app.view = crate::model::ViewMode::GitHubRepositories;
+        // A cancelled form still reloads the repository list; only the creation call is absent.
+        let mock = Mock::new(["[]".into(), "created".into(), "[]".into()]);
+        app.handle(crate::app::Action::New);
+        press(&mut app, "me/tool");
+        press(&mut app, "private");
+        press(&mut app, "origin");
+        press(&mut app, "later");
+        assert!(app.message_is_error, "{}", app.message);
+        assert!(
+            mock.calls()
+                .iter()
+                .all(|call| call[0] == "repo" && call[1] == "list")
+        );
+        app.handle(crate::app::Action::New);
+        for field in ["me/tool", "private", "", "create"] {
+            press(&mut app, field);
+        }
+        assert!(!app.message_is_error, "{}", app.message);
+        assert_eq!(mock.calls()[1], ["repo", "create", "me/tool", "--private"]);
     }
 
     #[test]
