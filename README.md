@@ -60,7 +60,7 @@ git-wirdo --repo /path/to/repo
 | --- | --- | --- |
 | `Tab` | Any | Cycle views (including workspaces, PRs, stashes and remotes) |
 | `j` / `k`, `↓` / `↑` | Any | Move the selection; the list follows it |
-| `r` | Any | Refresh repository state and the detail pane |
+| `r` | Any | Refresh repository state and the detail pane; local views also reload by themselves within about two seconds after another tool edits, stages, commits or switches branches |
 | `PageUp` / `PageDown` | Any | Scroll details by ten lines |
 | `←` / `→` | Any | Scroll long detail lines horizontally |
 | `/`, then text and `Enter` | Any | Search loaded commits in History, otherwise selected details; `Esc` cancels input |
