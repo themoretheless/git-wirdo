@@ -54,6 +54,8 @@ pub struct App {
     pub(crate) upstream_comparison: bool,
     pub(crate) review_files: Vec<FileEntry>,
     pub(crate) seen: HashMap<(bool, PathBuf), String>,
+    /// Repository digest taken just before the last reload; see [`App::changed_externally`].
+    pub(crate) fingerprint: Option<u64>,
     pub(crate) search: String,
     pub(crate) searching: bool,
     pub(crate) workspaces: Listed<crate::model::Workspace>,
@@ -99,8 +101,11 @@ impl App {
     }
 
     pub fn new(repository: Repository) -> Result<Self> {
+        // Taken before loading: a change racing the load is caught by the next poll.
+        let fingerprint = repository.fingerprint().ok();
         let state = repository.load_state()?;
         let mut app = Self {
+            fingerprint,
             navigation: crate::settings::Navigation::default(),
             recent_selection: 0,
             persistence_error: None,
@@ -170,6 +175,7 @@ impl App {
         let branch = self.selection_key(ViewMode::Branches, self.branch_selection);
         let viewport = (self.detail_scroll, self.detail_column);
         let previous_detail = self.detail_text.clone();
+        self.fingerprint = self.repository.fingerprint().ok();
         self.state = self
             .repository
             .load_state_with_history(self.history_limit)?;
