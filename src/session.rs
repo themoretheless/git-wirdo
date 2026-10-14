@@ -161,8 +161,8 @@ impl Session {
             self.app.handle_paste(text);
         }
     }
-    /// Keys handled on the UI thread: modal text entry, viewport scrolling and quitting.
-    /// Everything that may run Git or GitHub goes through the background worker.
+    /// Keys that only edit a prompt, a search or UI state never leave the terminal thread;
+    /// the final Enter of a prompt and every Git/GitHub action go to the worker.
     fn local_key(&self, key: KeyEvent) -> bool {
         let action = action_for_key(key);
         if action == Some(Action::Quit) {
@@ -176,7 +176,7 @@ impl Session {
         if self.app.searching {
             return key.code != KeyCode::Enter;
         }
-        action.is_some_and(|action| self.app.runs_locally(action))
+        action.is_some_and(|action| action.runs_locally(self.app.view))
     }
 }
 impl Drop for Session {

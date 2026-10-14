@@ -159,12 +159,13 @@ Expanded acceptance evidence:
   through `gh repo create --source . --remote`. Nothing is pushed; publishing
   stays an explicit `W`/`P` step. Typed `create` confirmation is required, and
   cancelled forms never contact GitHub. Covered by transport and TUI fixture tests.
-- Application logic is split into `app/{mod,actions,prompt,detail}.rs`. Actions
+- Application logic is split into `app/{mod,access,actions,keys,detail}.rs` and
+  `app/prompts/` (one file per domain); Git operations into `git/` by domain. Actions
   are dispatched per view before global fallbacks; prompt submissions compute one
   result and reload the repository exactly once, replacing the earlier
   double refresh after commits, stashes, pulls and branch integration.
 - Shared helpers replace repeated code: list cursor clamping, success/failure
-  reporting, typed confirmations, `Repository::resolve_path`, the `Operation`
+  reporting, typed confirmations, `Repository::resolve`, the `Operation`
   enum for continue/abort/summary, and shared machine-readable diff flags.
 - Performance: a refresh loads history once at the current window size instead
   of three times; the terminal redraws only after input, background progress or

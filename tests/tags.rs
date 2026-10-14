@@ -105,7 +105,7 @@ fn tag_dialog_requires_confirmed_local_deletion() {
     repo.write("file", "base");
     repo.commit_all("base");
     let mut app = App::new(repo.open()).unwrap();
-    app.view = ViewMode::Tags;
+    app.set_view(ViewMode::Tags);
     app.refresh().unwrap();
     app.handle(Action::New);
     for value in ["ui-tag", "", ""] {
@@ -114,14 +114,14 @@ fn tag_dialog_requires_confirmed_local_deletion() {
         }
         app.handle_key(KeyEvent::new(KeyCode::Enter, KeyModifiers::NONE));
     }
-    assert_eq!(app.tags[0].name, "ui-tag");
+    assert_eq!(app.tags().items[0].name, "ui-tag");
     app.handle(Action::Remove);
     app.handle_key(KeyEvent::new(KeyCode::Esc, KeyModifiers::NONE));
-    assert_eq!(app.repository.tags().unwrap().len(), 1);
+    assert_eq!(app.repository().tags().unwrap().len(), 1);
     app.handle(Action::Remove);
     for c in "delete".chars() {
         app.handle_key(KeyEvent::new(KeyCode::Char(c), KeyModifiers::NONE));
     }
     app.handle_key(KeyEvent::new(KeyCode::Enter, KeyModifiers::NONE));
-    assert!(app.tags.is_empty());
+    assert!(app.tags().items.is_empty());
 }

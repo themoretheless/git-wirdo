@@ -14,33 +14,33 @@ fn tracked_browser_reads_clean_files_preserves_pending_work_and_uses_original_re
     let mut app = App::new(repo.open()).unwrap();
     assert!(app.displayed_files().is_empty());
     app.handle(Action::BrowseTracked);
-    assert!(app.browse_tracked);
+    assert!(app.browse_tracked());
     assert_eq!(app.displayed_files()[0].path, Path::new("clean [a] ü.txt"));
     assert!(
-        app.detail_text
+        app.detail_text()
             .contains("committed content\n[UNTRACKED] literal")
     );
     app.handle(Action::FileHistory);
-    assert!(app.detail_text.contains("base"));
+    assert!(app.detail_text().contains("base"));
     app.handle(Action::FileBlame);
-    assert!(app.detail_text.contains("committed content"));
+    assert!(app.detail_text().contains("committed content"));
     repo.git(&["mv", "clean [a] ü.txt", "renamed [a] ü.txt"]);
     repo.write("renamed [a] ü.txt", "pending edit");
     let index = repo.git(&["diff", "--cached"]);
     app.handle(Action::Refresh);
-    assert!(app.detail_text.contains("committed content"));
+    assert!(app.detail_text().contains("committed content"));
     app.handle(Action::Stage);
     app.handle(Action::Unstage);
     app.handle(Action::Remove);
     app.handle(Action::OpenHunks);
     assert_eq!(repo.git(&["diff", "--cached"]), index);
-    assert!(app.prompt.is_none());
+    assert!(app.prompt().is_none());
     assert_eq!(
         std::fs::read_to_string(repo.path.join("renamed [a] ü.txt")).unwrap(),
         "pending edit"
     );
     app.handle(Action::BrowseTracked);
-    assert!(!app.browse_tracked && app.detail_text.contains("pending edit"));
+    assert!(!app.browse_tracked() && app.detail_text().contains("pending edit"));
 }
 
 #[test]

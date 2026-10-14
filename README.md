@@ -177,11 +177,14 @@ Background tasks keep the terminal responsive while Git runs.
 ## Code layout
 
 - `src/patch.rs` — exact-byte hunk separation for selective staging
-- `src/git.rs` — repository discovery, machine-readable Git output, and Git operations
+- `src/git/` — repository discovery and the `GitRunner` seam (`mod.rs`), with Git operations
+  split by domain: worktrees, working-tree files, history, branches, stashes, tags, remotes
 - `src/model.rs` — repository data and display-safe path labels
 - `src/app/mod.rs` — application state, selections, refresh, and error handling
+- `src/app/access.rs` — the public read accessors and named commands; fields stay crate-private
 - `src/app/actions.rs` — action dispatch: the current view claims an action first, then global ones
-- `src/app/prompt.rs` — multi-field forms, typed confirmations, and one reload per submission
+- `src/app/keys.rs` — key and paste handling for prompts, search and the palette
+- `src/app/prompts/` — multi-field forms grouped by domain, typed confirmations, one reload per submission
 - `src/app/detail.rs` — detail pane contents and in-pane search
 - `src/commands.rs` — searchable command palette entries per view
 - `src/github.rs`, `src/pr_review.rs` — GitHub CLI transport, PR lifecycle, and inline review

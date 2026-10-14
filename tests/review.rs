@@ -20,15 +20,15 @@ fn comparison_uses_merge_base_and_never_stages_review_paths() {
     repo.write("[file].txt", "working\n");
     let mut app = App::new(repo.open()).unwrap();
     app.handle(Action::ToggleComparison);
-    assert!(app.upstream_comparison && !app.message_is_error);
+    assert!(app.upstream_comparison() && !app.message_is_error());
     assert_eq!(app.displayed_files().len(), 1);
-    assert!(app.detail_text.contains("-base") && app.detail_text.contains("+working"));
+    assert!(app.detail_text().contains("-base") && app.detail_text().contains("+working"));
     let index = repo.git(&["ls-files", "--stage"]);
     app.handle(Action::Stage);
     app.handle(Action::Unstage);
     assert_eq!(repo.git(&["ls-files", "--stage"]), index);
     app.handle(Action::ToggleComparison);
-    assert!(!app.upstream_comparison);
+    assert!(!app.upstream_comparison());
     app.handle(Action::Stage);
     assert_ne!(repo.git(&["ls-files", "--stage"]), index);
 }
@@ -38,10 +38,10 @@ fn missing_upstream_is_recoverable_and_keeps_working_view() {
     let repo = TestRepo::new();
     let mut app = App::new(repo.open()).unwrap();
     app.handle(Action::ToggleComparison);
-    assert!(!app.upstream_comparison && app.running && app.message_is_error);
-    assert!(app.message.contains("upstream"));
+    assert!(!app.upstream_comparison() && app.running() && app.message_is_error());
+    assert!(app.message().contains("upstream"));
     app.handle(Action::Refresh);
-    assert!(!app.message_is_error);
+    assert!(!app.message_is_error());
 }
 
 #[test]
@@ -66,20 +66,20 @@ fn search_consumes_git_shortcuts_and_wraps_between_matches() {
     );
     let mut app = App::new(repo.open()).unwrap();
     app.handle(Action::PageDown);
-    assert_eq!(app.detail_scroll, 10);
+    assert_eq!(app.detail_scroll(), 10);
     app.handle(Action::Search);
     for c in "line 3".chars() {
         app.handle_key(KeyEvent::new(KeyCode::Char(c), KeyModifiers::NONE));
     }
-    assert!(app.running && repo.git(&["ls-files"]).is_empty());
+    assert!(app.running() && repo.git(&["ls-files"]).is_empty());
     app.handle_key(KeyEvent::new(KeyCode::Enter, KeyModifiers::NONE));
-    assert_eq!(app.detail_scroll, 4);
+    assert_eq!(app.detail_scroll(), 4);
     app.handle(Action::NextMatch);
-    assert_eq!(app.detail_scroll, 31);
+    assert_eq!(app.detail_scroll(), 31);
     for _ in 0..10 {
         app.handle(Action::NextMatch);
     }
-    assert_eq!(app.detail_scroll, 4);
+    assert_eq!(app.detail_scroll(), 4);
     app.handle(Action::NextItem);
-    assert_eq!(app.detail_scroll, 0);
+    assert_eq!(app.detail_scroll(), 0);
 }

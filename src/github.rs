@@ -492,7 +492,7 @@ mod tests {
         let repo = crate::test_support::TestRepo::new();
         let mut app = crate::app::App::new(repo.open()).unwrap();
         app.view = crate::model::ViewMode::PullRequests;
-        app.pull_requests.push(PullRequest {
+        app.pull_requests.items.push(PullRequest {
             number: 7,
             title: "Title".into(),
             url: "url".into(),
@@ -559,7 +559,7 @@ mod tests {
         assert!(
             app.message_is_error
                 && app.pr_filter.state == "open"
-                && app.pull_requests[0].number == 7
+                && app.pull_requests.items[0].number == 7
         );
         assert!(mock.calls().is_empty());
     }
@@ -567,7 +567,7 @@ mod tests {
     #[test]
     fn selected_approval_pins_the_reviewed_commit_and_rejects_changed_head() {
         let (_repo, app) = selected_app();
-        let pr = app.pull_requests[0].clone();
+        let pr = app.pull_requests.items[0].clone();
         let json = serde_json::json!({"number":7,"title":"Title","url":"url","headRefName":"topic","baseRefName":"main","headRefOid":pr.head_ref_oid,"isDraft":true});
         let mock = Mock::new([json.to_string(), "approved".into()]);
         review_selected(Path::new("."), &pr, "--approve", "").unwrap();
@@ -759,25 +759,22 @@ mod tests {
     fn tui_repository_creation_requires_typed_confirmation() {
         let (_repo, mut app) = selected_app();
         app.view = crate::model::ViewMode::GitHubRepositories;
-        // A cancelled form still reloads the repository list; only the creation call is absent.
-        let mock = Mock::new(["[]".into(), "created".into(), "[]".into()]);
+        // A cancelled form never reaches GitHub; a confirmed one creates, then reloads the list.
+        let mock = Mock::new(["created".into(), "[]".into()]);
         app.handle(crate::app::Action::New);
         press(&mut app, "me/tool");
         press(&mut app, "private");
         press(&mut app, "origin");
         press(&mut app, "later");
         assert!(app.message_is_error, "{}", app.message);
-        assert!(
-            mock.calls()
-                .iter()
-                .all(|call| call[0] == "repo" && call[1] == "list")
-        );
+        assert!(mock.calls().is_empty());
         app.handle(crate::app::Action::New);
         for field in ["me/tool", "private", "", "create"] {
             press(&mut app, field);
         }
         assert!(!app.message_is_error, "{}", app.message);
-        assert_eq!(mock.calls()[1], ["repo", "create", "me/tool", "--private"]);
+        assert_eq!(mock.calls()[0], ["repo", "create", "me/tool", "--private"]);
+        assert_eq!(mock.calls()[1][..2], ["repo", "list"]);
     }
 
     #[test]
@@ -803,7 +800,6 @@ mod tests {
     #[cfg(unix)]
     #[test]
     fn api_failure_preserves_server_reason_alongside_stderr_status() {
-        use std::os::unix::fs::PermissionsExt;
         let path = std::env::temp_dir().join(format!("wirdo-gh-error-{}", std::process::id()));
         std::fs::create_dir_all(&path).unwrap();
         let program = path.join("fake-gh");
@@ -811,8 +807,10 @@ mod tests {
             &program,
             "#!/bin/sh\necho '{\"errors\":[\"Can not approve your own pull request\"]}'\necho 'gh: Unprocessable Entity (HTTP 422)' >&2\nexit 1\n",
         ).unwrap();
-        std::fs::set_permissions(&program, std::fs::Permissions::from_mode(0o700)).unwrap();
-        let error = run_program(&path, program.as_os_str(), &["api"])
+        // Run the script through sh: executing a file this process just wrote races with
+        // concurrent test forks that still hold its write descriptor (ETXTBSY).
+        let script = program.to_str().unwrap();
+        let error = run_program(&path, std::ffi::OsStr::new("/bin/sh"), &[script, "api"])
             .unwrap_err()
             .to_string();
         assert!(error.contains("HTTP 422"), "{error}");
@@ -826,16 +824,18 @@ mod tests {
     #[cfg(unix)]
     #[test]
     fn command_transport_preserves_arguments_cwd_and_reports_failures() {
-        use std::os::unix::fs::PermissionsExt;
         let path = std::env::temp_dir().join(format!("wirdo-gh-{}", std::process::id()));
         std::fs::create_dir_all(&path).unwrap();
         let program = path.join("fake-gh");
         std::fs::write(&program, "#!/bin/sh\n[ \"$GH_PROMPT_DISABLED\" = 1 ] || exit 9\n[ \"$1\" = fail ] && { echo 'auth failed' >&2; exit 1; }\nprintf '%s\\n' \"$PWD\" \"$@\"\n").unwrap();
-        std::fs::set_permissions(&program, std::fs::Permissions::from_mode(0o700)).unwrap();
+        // Through sh, as above, so a concurrent fork cannot make the spawn fail with ETXTBSY.
+        let script = program.to_str().unwrap();
+        let sh = std::ffi::OsStr::new("/bin/sh");
         let output = run_program(
             &path,
-            program.as_os_str(),
+            sh,
             &[
+                script,
                 "pr",
                 "comment",
                 "--body",
@@ -846,7 +846,7 @@ mod tests {
         assert!(output.contains("literal $(echo secret); two words"));
         assert!(output.contains(path.to_str().unwrap()));
         assert!(
-            run_program(&path, program.as_os_str(), &["fail"])
+            run_program(&path, sh, &[script, "fail"])
                 .unwrap_err()
                 .to_string()
                 .contains("auth failed")

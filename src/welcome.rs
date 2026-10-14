@@ -4,7 +4,7 @@ use std::sync::Arc;
 use std::thread::JoinHandle;
 use std::time::{Duration, Instant};
 
-use anyhow::{Result, ensure};
+use anyhow::Result;
 use crossterm::event::{self, Event, KeyCode, KeyEventKind, KeyModifiers};
 use git_wirdo::{
     git::Repository,
@@ -56,14 +56,10 @@ impl Drop for Worker {
 }
 fn launch(base: PathBuf, operation: Operation, values: Vec<String>) -> Worker {
     launch_task(move || match operation {
-        Operation::Open => {
-            let path = Path::new(&values[0]);
-            Repository::open(&if path.is_absolute() {
-                path.to_owned()
-            } else {
-                base.join(path)
-            })
-        }
+        Operation::Open => Repository::open(&git_wirdo::git::resolve_against(
+            &base,
+            Path::new(&values[0]),
+        )),
         Operation::Initialize => Repository::initialize(&base, Path::new(&values[0]), &values[1]),
         Operation::Clone => {
             Repository::clone_into(&base, values[0].as_ref(), Path::new(&values[1]))
@@ -83,11 +79,7 @@ fn launch_task(run: impl FnOnce() -> Result<Repository> + Send + 'static) -> Wor
 }
 
 pub fn run(base: PathBuf, state_path: Option<&Path>) -> Result<Option<Repository>> {
-    use std::io::IsTerminal;
-    ensure!(
-        std::io::stdin().is_terminal() && std::io::stdout().is_terminal(),
-        "Interactive mode requires a terminal; use --headless for scripts"
-    );
+    super::terminal::require_tty()?;
     let (recent, mut message) = match state_path.map(git_wirdo::settings::load).transpose() {
         Ok(navigation) => (
             navigation.map(|n| n.repositories).unwrap_or_default(),
