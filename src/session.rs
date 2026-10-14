@@ -4,7 +4,7 @@ use crate::{
     input::action_for_key,
     process::{Control, controlled},
 };
-use crossterm::event::{KeyCode, KeyEvent, KeyEventKind};
+use crossterm::event::{KeyCode, KeyEvent, KeyEventKind, KeyModifiers};
 use std::sync::{
     Arc,
     atomic::{AtomicBool, Ordering},
@@ -82,6 +82,21 @@ impl Session {
             }
         }
     }
+    /// Reload through the background worker when another tool changed the repository.
+    /// Never interrupts typing, a running task or a failure that needs a manual refresh.
+    pub fn refresh_if_changed(&mut self) -> bool {
+        if self.busy()
+            || self.recovery_required
+            || self.app.prompt.is_some()
+            || self.app.searching
+            || !self.app.changed_externally()
+        {
+            return false;
+        }
+        self.handle_key(KeyEvent::new(KeyCode::Char('r'), KeyModifiers::NONE));
+        true
+    }
+
     pub fn handle_key(&mut self, key: KeyEvent) {
         self.tick();
         if !self.app.running {

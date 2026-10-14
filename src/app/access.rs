@@ -12,6 +12,22 @@ use crate::pr_review::PrFile;
 use crate::settings::{Navigation, Store};
 
 impl App {
+    /// Whether another tool changed the repository since the last reload. Views backed by
+    /// GitHub are skipped: reloading them costs network calls that a local edit never needs.
+    pub fn changed_externally(&self) -> bool {
+        if matches!(
+            self.view,
+            ViewMode::PullRequests | ViewMode::PrFiles | ViewMode::GitHubRepositories
+        ) {
+            return false;
+        }
+        match (self.fingerprint, self.repository.fingerprint()) {
+            (Some(previous), Ok(current)) => previous != current,
+            // No baseline yet (or Git failed): adopt nothing and let a manual refresh decide.
+            _ => false,
+        }
+    }
+
     pub fn view(&self) -> ViewMode {
         self.view
     }

@@ -6,6 +6,23 @@ impl Repository {
         self.load_state_with_history(HISTORY_PAGE)
     }
 
+    /// A cheap digest of HEAD, upstream counts, the index and the working tree, from one
+    /// `git status` call. It changes whenever another tool edits files, stages, commits,
+    /// switches branches or fetches, so callers know when a full reload is worth its cost.
+    pub fn fingerprint(&self) -> Result<u64> {
+        use std::hash::{Hash, Hasher};
+        let status = self.git([
+            "status",
+            "--porcelain=v2",
+            "--branch",
+            "-z",
+            "--untracked-files=all",
+        ])?;
+        let mut hasher = std::collections::hash_map::DefaultHasher::new();
+        status.hash(&mut hasher);
+        Ok(hasher.finish())
+    }
+
     /// Snapshot status, branches and the first `history_limit` commits in one pass.
     pub fn load_state_with_history(&self, history_limit: usize) -> Result<RepoState> {
         let files = parse_status(&self.git([

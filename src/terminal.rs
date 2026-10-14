@@ -18,6 +18,9 @@ use git_wirdo::git::Repository;
 use git_wirdo::session::Session;
 use git_wirdo::ui::Ui;
 
+/// How often an idle client checks for changes made outside it; one `git status` per poll.
+const EXTERNAL_POLL: Duration = Duration::from_secs(2);
+
 pub(crate) struct TerminalGuard;
 
 impl TerminalGuard {
@@ -84,7 +87,13 @@ pub fn run(repository: Repository, state_path: Option<PathBuf>) -> Result<()> {
     // Redraw only after input, a finished or running background task, or a settings change;
     // an idle client must not rebuild every list ten times a second.
     let mut dirty = true;
+    // Edits from an editor, another terminal or an IDE show up without pressing r.
+    let mut last_poll = Instant::now();
     loop {
+        if last_poll.elapsed() >= EXTERNAL_POLL {
+            dirty |= session.refresh_if_changed();
+            last_poll = Instant::now();
+        }
         dirty |= session.busy();
         session.tick();
         if !session.busy()

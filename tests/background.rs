@@ -359,3 +359,56 @@ fn cancelled_operation_with_failed_reload_blocks_mutations_until_recovery() {
     finish(&mut session);
     assert!(repo.git(&["diff", "--cached", "--name-only"]).is_empty());
 }
+
+#[test]
+fn edits_made_outside_the_client_are_picked_up_without_a_keypress() {
+    let repo = TestRepo::new();
+    repo.write("file", "base\n");
+    repo.commit_all("base");
+    let mut session = Session::new(App::new(repo.open()).unwrap());
+    assert!(!session.app.changed_externally());
+    assert!(
+        !session.refresh_if_changed(),
+        "an unchanged repository is not reloaded"
+    );
+
+    repo.write("file", "edited elsewhere\n");
+    repo.write("new", "created elsewhere\n");
+    assert!(session.app.changed_externally());
+    assert!(session.refresh_if_changed());
+    finish(&mut session);
+    assert_eq!(
+        session.app.state().files.len(),
+        2,
+        "{}",
+        session.app.message()
+    );
+    assert!(
+        !session.app.changed_externally(),
+        "the reload adopts the new baseline"
+    );
+
+    // A commit from another terminal changes HEAD even with a clean tree.
+    repo.commit_all("elsewhere");
+    assert!(session.refresh_if_changed());
+    finish(&mut session);
+    assert!(session.app.state().files.is_empty());
+    assert_eq!(session.app.state().commits[0].subject, "elsewhere");
+}
+
+#[test]
+fn external_reload_never_interrupts_typing() {
+    let repo = TestRepo::new();
+    repo.write("file", "base\n");
+    repo.commit_all("base");
+    let mut session = Session::new(App::new(repo.open()).unwrap());
+    session.handle_key(key('/'));
+    repo.write("file", "edited elsewhere\n");
+    assert!(
+        !session.refresh_if_changed(),
+        "search input must not be replaced"
+    );
+    session.handle_key(KeyEvent::new(KeyCode::Esc, KeyModifiers::NONE));
+    finish(&mut session);
+    assert!(session.refresh_if_changed());
+}
