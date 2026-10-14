@@ -604,9 +604,10 @@ performance, acceptance evidence and candidates for the next feature stage.
   Binary, rename, mode, new-file and deleted-file changes use whole-file/hunk
   operations instead.
 - In History select the **base commit to keep**, then `~`. Edit the subsequent
-  oldest-first todo using `pick`, `squash`, or `fixup` and full commit IDs. Reorder
-  lines freely; include every prepared commit exactly once. Alt-Enter inserts a
-  newline, Ctrl-U clears, pasted multiline text is supported, Esc cancels.
+  oldest-first todo using `pick`, `squash`, or `fixup` and full commit IDs. Separate entries with a newline or `;`. Reorder
+  entries freely; include every prepared commit exactly once. Alt-Enter inserts a
+  newline, Ctrl-U clears, Esc cancels. Unix supports bracketed multiline paste;
+  on native Windows use `;` between pasted entries.
   Confirm with `rebase`. This editor accepts 1–200 commits in clean, linear,
   attached-branch history. Rewriting published commits still requires coordinated
   downstream handling; this action does not push. Original HEAD is retained in

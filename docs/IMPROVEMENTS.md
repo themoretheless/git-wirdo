@@ -121,3 +121,10 @@ base (the root commit itself is not rewritten), requires an attached clean branc
 drop/edit/exec. It runs the existing cancellable Git process and preserves Git's
 in-progress state on conflicts. Squash uses Git's combined messages without
 opening an external editor. No new performance improvement is claimed here.
+
+Windows follow-up: the CI wrapper now emits UTF-8 even when redirected Python
+stdout defaults to cp1252, preserving Unicode terminal failure diagnostics and
+the command's exit code. The todo editor also accepts `;` separators for native
+Windows input, whose crossterm backend does not emit Unix bracketed-paste events.
+The ConPTY scenario uses this native input path; Unix PTY still checks multiline
+bracketed paste.

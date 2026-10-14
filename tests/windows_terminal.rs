@@ -481,8 +481,7 @@ fn filters_lines_and_interactive_rebase_in_conpty() {
     terminal.key(b"j", "base");
     terminal.key(b"~", "Rebase todo:");
     terminal.send(b"\x15");
-    terminal.send(format!("\x1b[200~{todo}\x1b[201~\r").as_bytes());
-    terminal.expect("Type rebase");
+    terminal.field(&todo.replace('\n', ";"), "Type rebase");
     terminal.field("rebase", "Interactive rebase completed");
     assert_eq!(repo.git(&["rev-list", "--count", "HEAD"]).trim(), "2");
     terminal.quit();

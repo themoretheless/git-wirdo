@@ -50,7 +50,10 @@ impl Repository {
                 .split_once('\0')
                 .context("Malformed rebase commit record")?;
             commits.push(sha.to_owned());
-            todo.push_str(&format!("pick {sha} # {}\n", subject.escape_debug()));
+            todo.push_str(&format!(
+                "pick {sha} # {}\n",
+                subject.escape_debug().to_string().replace(';', "\\u{3b}")
+            ));
         }
         ensure!(
             !commits.is_empty() && commits.len() <= 200,
@@ -68,7 +71,11 @@ impl Repository {
     pub fn run_interactive_rebase(&self, plan: &InteractiveRebase, todo: &str) -> Result<()> {
         let mut ids = std::collections::HashSet::new();
         let mut canonical = String::new();
-        for (index, line) in todo.lines().filter(|l| !l.trim().is_empty()).enumerate() {
+        for (index, line) in todo
+            .split(['\n', ';'])
+            .filter(|l| !l.trim().is_empty())
+            .enumerate()
+        {
             let fields: Vec<_> = line.split_whitespace().collect();
             ensure!(
                 (fields.len() == 2 || (fields.len() > 2 && fields[2] == "#"))

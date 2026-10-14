@@ -240,7 +240,7 @@ fn squash_retains_combined_message_and_final_tree() {
     let rows: Vec<_> = plan.todo.lines().collect();
     git.run_interactive_rebase(
         &plan,
-        &format!("{}\n{}", rows[0], rows[1].replacen("pick", "squash", 1)),
+        &format!("{};{}", rows[0], rows[1].replacen("pick", "squash", 1)),
     )
     .unwrap();
     assert_eq!(repo.git(&["rev-parse", "HEAD^{tree}"]), tree);
