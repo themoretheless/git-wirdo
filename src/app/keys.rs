@@ -22,6 +22,7 @@ impl App {
             }
             target.push_str(text);
         }
+        self.sync_filter_prompt();
     }
 
     pub fn handle_key(&mut self, key: KeyEvent) {
@@ -58,6 +59,7 @@ impl App {
             }
             if key.code == KeyCode::Char('u') && key.modifiers == KeyModifiers::CONTROL {
                 self.prompt.as_mut().unwrap().text.clear();
+                self.sync_filter_prompt();
                 return;
             }
             if key.code == KeyCode::Enter && key.modifiers == KeyModifiers::ALT {
@@ -71,7 +73,14 @@ impl App {
                 return;
             }
             if key.code == KeyCode::Esc {
+                let filtering = self
+                    .prompt
+                    .as_ref()
+                    .is_some_and(|p| matches!(p.kind, PromptKind::ListFilter(_)));
                 self.prompt = None;
+                if filtering {
+                    self.refresh_detail();
+                }
                 return;
             }
             let prompt = self.prompt.as_mut().unwrap();
@@ -98,6 +107,10 @@ impl App {
                 }
                 _ => {}
             }
+            self.sync_filter_prompt();
+            return;
+        }
+        if self.handle_editor_key(key) {
             return;
         }
         if self.searching

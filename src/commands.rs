@@ -38,6 +38,9 @@ pub fn filtered(view: ViewMode, query: &str) -> Vec<Entry> {
             ("Unstage selected file", Unstage),
             ("Inspect editable hunks", OpenHunks),
             ("Filter file names", FilterList),
+            ("Toggle selected file for stash", ToggleFileSelection),
+            ("Stash selected files", StashSelected),
+            ("Clear file name filter", ClearFilter),
             ("Restore selected file from index", RestoreFromIndex),
             ("Discard selected file from HEAD", Remove),
             ("Compare upstream / working changes", ToggleComparison),
@@ -50,6 +53,7 @@ pub fn filtered(view: ViewMode, query: &str) -> Vec<Entry> {
                 InteractiveRebase,
             ),
             ("Load older history", LoadHistory),
+            ("Edit raw rebase todo", RawInteractiveRebase),
             ("Toggle history graph", ToggleGraph),
             ("Cherry-pick selected commit", CherryPick),
             ("Revert selected commit", RevertCommit),
@@ -58,6 +62,7 @@ pub fn filtered(view: ViewMode, query: &str) -> Vec<Entry> {
         ViewMode::Branches => &[
             ("Checkout selected branch", SwitchBranch),
             ("Filter branch names", FilterList),
+            ("Clear branch name filter", ClearFilter),
             ("Rename selected branch", RenameBranch),
             ("Delete selected branch", Remove),
             ("Merge selected branch", MergeBranch),
@@ -115,6 +120,7 @@ pub fn filtered(view: ViewMode, query: &str) -> Vec<Entry> {
         ViewMode::Hunks => &[
             ("Stage selected hunk", Stage),
             ("Stage or unstage selected lines", StageLines),
+            ("Select lines visually", EditLines),
             ("Unstage selected hunk", Unstage),
             ("Toggle staged / unstaged hunks", ToggleComparison),
         ],

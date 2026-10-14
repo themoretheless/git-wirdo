@@ -6,8 +6,7 @@ use crate::model::{ViewMode, display_path};
 
 impl App {
     pub(super) fn selected_detail(&self) -> Result<String> {
-        if self.filter_view == Some(self.view)
-            && !self.list_filter.is_empty()
+        if !self.name_filter().is_empty()
             && matches!(self.view, ViewMode::Files | ViewMode::Branches)
             && !self.visible_indices().contains(&self.selection())
         {

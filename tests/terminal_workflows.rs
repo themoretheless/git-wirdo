@@ -802,10 +802,72 @@ fn interactive_rebase_editor_through_terminal() {
     terminal.view("History");
     terminal.key(b"j", "a");
     terminal.key(b"j", "base");
-    terminal.key(b"~", "Rebase todo:");
+    terminal.key(b":", "Commands:");
+    terminal.field("Edit raw rebase todo", "Rebase todo:");
     terminal.send(b"\x15");
     terminal.field(&todo, "Type rebase");
     terminal.field("rebase", "Interactive rebase completed");
+    assert_eq!(repo.git(&["rev-list", "--count", "HEAD"]).trim(), "2");
+    terminal.quit();
+}
+
+#[test]
+fn visual_lines_live_filters_and_selected_stash_through_terminal() {
+    let repo = TestRepo::new();
+    repo.write("aaa", "base\n");
+    repo.write("zzz", "one\ntwo\nthree\n");
+    repo.commit_all("base");
+    repo.write("aaa", "other staged\n");
+    repo.git(&["add", "aaa"]);
+    repo.write("zzz", "ONE\ntwo\nTHREE\n");
+    let mut terminal = tui(&repo);
+    terminal.key(b"\\", "Name filter");
+    terminal.key(b"zzz", "Filter: zzz (1 matches)");
+    terminal.key(b"\r", "Filter: zzz (1 matches)");
+    terminal.key(b"i", "Unstaged hunk");
+    terminal.key(b" ", "Select lines | 0 selected");
+    terminal.key(b"v", "1 selected");
+    terminal.key(b"j", "2 selected");
+    terminal.key(b"s", "Updated selected lines in index");
+    assert_eq!(repo.git(&["show", ":zzz"]), "ONE\ntwo\nthree\n");
+    terminal.view("Files");
+    terminal.key(b" ", "1 files selected for stash");
+    terminal.key(b"$", "Selected stash message");
+    terminal.field("only zzz", "Type stash");
+    terminal.field("stash", "Saved selected files in stash");
+    assert_eq!(repo.git(&["show", ":aaa"]), "other staged\n");
+    assert_eq!(
+        repo.git(&["diff", "stash@{0}^1", "stash@{0}", "--name-only"])
+            .trim(),
+        "zzz"
+    );
+    assert_eq!(
+        std::fs::read_to_string(repo.path.join("zzz")).unwrap(),
+        "one\ntwo\nthree\n"
+    );
+    terminal.quit();
+}
+
+#[test]
+fn visual_rebase_reorder_and_preview_through_terminal() {
+    let repo = TestRepo::new();
+    repo.write("base", "base");
+    repo.commit_all("base");
+    repo.write("a", "a");
+    repo.commit_all("first");
+    repo.write("b", "b");
+    repo.commit_all("second");
+    let mut terminal = tui(&repo);
+    terminal.view("History");
+    terminal.key(b"j", "first");
+    terminal.key(b"j", "base");
+    terminal.key(b"~", "Interactive rebase | oldest first");
+    terminal.key(b"J", "Interactive rebase | oldest first");
+    terminal.key(b"f", "fixup");
+    terminal.key(b"v", "2 original commits -> 1 resulting commits");
+    terminal.key(b"\r", "Type rebase");
+    terminal.field("rebase", "Interactive rebase completed");
+    assert_eq!(repo.git(&["log", "-1", "--format=%s"]).trim(), "second");
     assert_eq!(repo.git(&["rev-list", "--count", "HEAD"]).trim(), "2");
     terminal.quit();
 }

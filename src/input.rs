@@ -17,6 +17,9 @@ pub fn action_for_key(key: KeyEvent) -> Option<Action> {
         return None;
     }
     Some(match key.code {
+        KeyCode::Esc => Action::ClearFilter,
+        KeyCode::Char(' ') => Action::ToggleFileSelection,
+        KeyCode::Char('$') => Action::StashSelected,
         KeyCode::Char('\\') => Action::FilterList,
         KeyCode::Char('=') => Action::StageLines,
         KeyCode::Char('~') => Action::InteractiveRebase,

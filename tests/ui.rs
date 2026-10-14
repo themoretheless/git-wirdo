@@ -228,3 +228,54 @@ fn multiline_paste_is_input_text_and_large_paste_is_rejected_without_truncation(
     assert_eq!(app.prompt().as_ref().unwrap().text, before);
     assert!(screen(&app, 180, 30).contains("literal qPcs↵message"));
 }
+
+#[test]
+fn visual_line_cursor_stays_visible_in_large_diff_and_narrow_window() {
+    use crossterm::event::{KeyCode, KeyEvent, KeyModifiers};
+    let repo = TestRepo::new();
+    let base = (0..10000).map(|i| format!("old {i}\n")).collect::<String>();
+    let changed = (0..10000)
+        .map(|i| format!("新しい {i}\n"))
+        .collect::<String>();
+    repo.write("wide ü", &base);
+    repo.commit_all("base");
+    repo.write("wide ü", &changed);
+    let mut app = App::new(repo.open()).unwrap();
+    app.handle(Action::OpenHunks);
+    app.handle(Action::EditLines);
+    app.handle_key(KeyEvent::new(KeyCode::End, KeyModifiers::NONE));
+    app.handle_key(KeyEvent::new(KeyCode::Char(' '), KeyModifiers::NONE));
+    let rendered = screen(&app, 80, 20);
+    assert!(rendered.contains("新しい 9999"), "{rendered}");
+    assert!(rendered.contains("[x] 20000"), "{rendered}");
+    assert!(rendered.contains("Select lines"));
+    assert!(repo.git(&["diff", "--cached"]).is_empty());
+}
+
+#[test]
+fn long_rebase_preview_can_scroll_to_the_final_commit_groups() {
+    use crossterm::event::{KeyCode, KeyEvent, KeyModifiers};
+    let repo = TestRepo::new();
+    repo.write("file", "base");
+    repo.commit_all("base");
+    for i in 0..20 {
+        repo.write("file", &format!("version {i}"));
+        repo.commit_all(&format!("change {i}"));
+    }
+    let mut app = App::new(repo.open()).unwrap();
+    app.set_view(git_wirdo::model::ViewMode::History);
+    app.set_history_window(100, false);
+    app.handle(Action::Refresh);
+    app.select(20);
+    app.handle(Action::InteractiveRebase);
+    assert!(app.rebase_editor_open());
+    for _ in 0..3 {
+        app.handle_key(KeyEvent::new(KeyCode::PageDown, KeyModifiers::NONE));
+    }
+    let rendered = screen(&app, 180, 20);
+    assert!(
+        rendered.contains("20 original commits -> 20 resulting commits"),
+        "{rendered}"
+    );
+    assert_eq!(repo.git(&["rev-list", "--count", "HEAD"]).trim(), "21");
+}

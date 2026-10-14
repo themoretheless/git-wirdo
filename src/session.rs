@@ -73,6 +73,8 @@ impl Session {
             Err(_) => {
                 self.recovery_required = true;
                 self.app.prompt = None;
+                self.app.line_editor = None;
+                self.app.rebase_editor = None;
                 self.app.searching = false;
                 self.app.message = "Background task panicked; refresh before another action".into();
                 self.app.message_is_error = true;
@@ -170,6 +172,8 @@ impl Session {
                 recovery_required = refreshed.is_err();
                 if recovery_required {
                     updated.prompt = None;
+                    updated.line_editor = None;
+                    updated.rebase_editor = None;
                     updated.searching = false;
                 }
                 updated.message = match refreshed { Ok(()) => "Operation cancelled; repository state reloaded. Inspect changes before retrying.".into(), Err(error) => format!("Operation cancelled; refresh failed: {error:#}") };
@@ -201,9 +205,17 @@ impl Session {
             return true;
         }
         if let Some(prompt) = &self.app.prompt {
+            if matches!(prompt.kind, crate::app::PromptKind::ListFilter(_))
+                && key.code == KeyCode::Esc
+            {
+                return false;
+            }
             return key.modifiers == crossterm::event::KeyModifiers::ALT
                 || key.code != KeyCode::Enter
                 || prompt.values.len() + 1 < prompt.labels.len();
+        }
+        if self.app.line_editor.is_some() || self.app.rebase_editor.is_some() {
+            return self.app.editor_key_is_local(key);
         }
         if self.app.searching {
             return key.code != KeyCode::Enter;
@@ -229,6 +241,14 @@ mod tests {
         let repo = crate::test_support::TestRepo::new();
         std::fs::write(repo.open().root().join("file"), "pending\n").unwrap();
         let mut session = Session::new(App::new(repo.open()).unwrap());
+        // A stale editor must not swallow the recovery refresh after a worker panic.
+        let file = session.app.state.files[0].clone();
+        session.app.line_editor = Some(crate::app::editors::LineEditor::new(crate::patch::Hunk {
+            file,
+            staged: false,
+            patch: b"@@ -1 +1 @@\n-base\n+pending\n".to_vec(),
+            snapshot: Vec::new(),
+        }));
         let worker = thread::spawn(|| panic!("injected worker failure"));
         while !worker.is_finished() {
             thread::yield_now();
@@ -242,6 +262,10 @@ mod tests {
             description: "injected failure".into(),
         });
         session.tick();
+        assert!(
+            !session.app.line_editor_open(),
+            "failed task must close the editor before recovery"
+        );
         session.handle_key(KeyEvent::new(
             KeyCode::Char('s'),
             crossterm::event::KeyModifiers::NONE,
