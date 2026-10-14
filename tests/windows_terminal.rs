@@ -453,14 +453,10 @@ fn filters_lines_and_interactive_rebase_in_conpty() {
     let repo = TestRepo::new();
     repo.write("base", "base\n");
     repo.commit_all("base");
-    let base = repo.git(&["rev-parse", "HEAD"]).trim().to_owned();
     repo.write("aaa", "a\n");
     repo.commit_all("a");
     repo.write("zzz", "one\ntwo\nthree\n");
     repo.commit_all("b");
-    let plan = repo.open().prepare_interactive_rebase(&base).unwrap();
-    let rows: Vec<_> = plan.todo.lines().collect();
-    let todo = format!("{}\n{}", rows[0], rows[1].replacen("pick", "fixup", 1));
     repo.write("zzz", "ONE\ntwo\nTHREE\n");
     let mut terminal = Terminal::new(&repo);
     terminal.expect("zzz");
@@ -479,10 +475,46 @@ fn filters_lines_and_interactive_rebase_in_conpty() {
     terminal.key(b"\t", "History");
     terminal.key(b"j", "a");
     terminal.key(b"j", "base");
-    terminal.key(b"~", "Rebase todo:");
-    terminal.send(b"\x15");
-    terminal.field(&todo.replace('\n', ";"), "Type rebase");
+    terminal.key(b"~", "Interactive rebase | oldest first");
+    terminal.key(b"J", "Interactive rebase | oldest first");
+    terminal.key(b"f", "fixup");
+    terminal.key(b"v", "2 original commits -> 1 resulting commits");
+    terminal.key(b"\r", "Type rebase");
     terminal.field("rebase", "Interactive rebase completed");
     assert_eq!(repo.git(&["rev-list", "--count", "HEAD"]).trim(), "2");
+    terminal.quit();
+}
+
+#[test]
+fn visual_lines_live_filters_and_selected_stash_in_conpty() {
+    let repo = TestRepo::new();
+    repo.write("aaa", "base\n");
+    repo.write("zzz", "one\ntwo\nthree\n");
+    repo.commit_all("base");
+    repo.write("aaa", "other staged\n");
+    repo.git(&["add", "aaa"]);
+    repo.write("zzz", "ONE\ntwo\nTHREE\n");
+    let mut terminal = Terminal::new(&repo);
+    terminal.key(b"\\", "Name filter");
+    terminal.key(b"zzz", "Filter: zzz (1 matches)");
+    terminal.key(b"\r", "Filter: zzz (1 matches)");
+    terminal.key(b"i", "Unstaged hunk");
+    terminal.key(b" ", "Select lines | 0 selected");
+    terminal.key(b"v", "1 selected");
+    terminal.key(b"j", "2 selected");
+    terminal.key(b"s", "Updated selected lines in index");
+    assert_eq!(repo.git(&["show", ":zzz"]), "ONE\ntwo\nthree\n");
+    terminal.key(b":", "Commands:");
+    terminal.field("View files", "View: Files");
+    terminal.key(b" ", "1 files selected for stash");
+    terminal.key(b"$", "Selected stash message");
+    terminal.field("only zzz", "Type stash");
+    terminal.field("stash", "Saved selected files in stash");
+    assert_eq!(repo.git(&["show", ":aaa"]), "other staged\n");
+    assert_eq!(
+        repo.git(&["diff", "stash@{0}^1", "stash@{0}", "--name-only"])
+            .trim(),
+        "zzz"
+    );
     terminal.quit();
 }

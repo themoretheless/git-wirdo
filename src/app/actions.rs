@@ -13,6 +13,11 @@ use crate::model::{ViewMode, display_path};
 /// UI-independent commands; terminal key bindings live in `input`.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Action {
+    EditLines,
+    RawInteractiveRebase,
+    ToggleFileSelection,
+    StashSelected,
+    ClearFilter,
     FilterList,
     StageLines,
     InteractiveRebase,
@@ -86,7 +91,9 @@ impl Action {
     /// the terminal thread; everything that touches Git or GitHub runs in the worker.
     pub fn runs_locally(self, view: ViewMode) -> bool {
         match self {
-            Self::FilterList
+            Self::EditLines
+            | Self::ToggleFileSelection
+            | Self::FilterList
             | Self::StageLines
             | Self::Quit
             | Self::CommandPalette
@@ -148,13 +155,14 @@ impl App {
                     | Action::Remove
                     | Action::RestoreFromIndex
                     | Action::ToggleSeen
+                    | Action::ToggleFileSelection
+                    | Action::StashSelected
             )
         {
             self.message = "File inspection is read-only; return to working changes first".into();
             return Ok(());
         }
-        if self.filter_view == Some(self.view)
-            && !self.list_filter.is_empty()
+        if !self.name_filter().is_empty()
             && matches!(self.view, ViewMode::Files | ViewMode::Branches)
             && !self.visible_indices().contains(&self.selection())
             && matches!(
@@ -171,21 +179,36 @@ impl App {
                     | Action::RenameBranch
                     | Action::MergeBranch
                     | Action::RebaseBranch
+                    | Action::ToggleFileSelection
             )
         {
             self.notify("No matching selection; clear the name filter first");
             return Ok(());
+        }
+        if matches!(action, Action::Stage | Action::Unstage) && self.line_editor.is_some() {
+            let editor = self.line_editor.as_ref().unwrap();
+            if (action == Action::Unstage) != editor.hunk.staged {
+                self.notify("Use s for unstaged lines or u for staged lines");
+                return Ok(());
+            }
+            let selected = editor.selection();
+            if selected.is_empty() {
+                self.notify("Select lines with Space or v before applying");
+                return Ok(());
+            }
+            let partial = editor.hunk.select_lines(&selected)?;
+            self.line_editor = None;
+            return self.run_action(
+                |repo| repo.apply_hunk(&partial),
+                "Updated selected lines in index",
+            );
         }
         match action {
             Action::FilterList if matches!(self.view, ViewMode::Files | ViewMode::Branches) => {
                 self.start_prefilled_prompt(
                     PromptKind::ListFilter(self.view),
                     vec!["Name filter (blank clears)"],
-                    vec![if self.filter_view == Some(self.view) {
-                        self.list_filter.clone()
-                    } else {
-                        String::new()
-                    }],
+                    vec![self.name_filter().to_owned()],
                 );
             }
             Action::StageLines
@@ -200,7 +223,88 @@ impl App {
                     );
                 }
             }
+            Action::EditLines | Action::ToggleFileSelection
+                if self.view == ViewMode::Hunks
+                    && !self.browse_tracked
+                    && !self.upstream_comparison =>
+            {
+                if let Some(hunk) = self.hunks.selected().cloned() {
+                    anyhow::ensure!(
+                        hunk.supports_line_selection(),
+                        "Use whole-hunk staging for file creation or deletion"
+                    );
+                    let editor = super::editors::LineEditor::new(hunk);
+                    if editor.count > 0 {
+                        self.line_editor = Some(editor);
+                    }
+                }
+            }
+            Action::ToggleFileSelection
+                if self.view == ViewMode::Files
+                    && !self.browse_tracked
+                    && !self.upstream_comparison =>
+            {
+                if let Some(file) = self.displayed_files().get(self.file_selection).cloned() {
+                    if !self.stash_files.remove(&file.path) {
+                        self.stash_files.insert(file.path.clone());
+                    }
+                    self.notify(format!(
+                        "{} files selected for stash; $ saves selection",
+                        self.stash_files.len()
+                    ));
+                }
+            }
+            Action::StashSelected
+                if self.view == ViewMode::Files
+                    && !self.browse_tracked
+                    && !self.upstream_comparison =>
+            {
+                let files: Vec<_> = if self.stash_files.is_empty() {
+                    if self.visible_indices().contains(&self.file_selection) {
+                        self.displayed_files()
+                            .get(self.file_selection)
+                            .cloned()
+                            .into_iter()
+                            .collect()
+                    } else {
+                        Vec::new()
+                    }
+                } else {
+                    self.state
+                        .files
+                        .iter()
+                        .filter(|f| self.stash_files.contains(&f.path))
+                        .cloned()
+                        .collect()
+                };
+                let request = self.repository.prepare_stash_files(&files)?;
+                self.detail_text = format!(
+                    "Stash selected files (other files remain):\n{}",
+                    files
+                        .iter()
+                        .map(|f| f.label())
+                        .collect::<Vec<_>>()
+                        .join("\n")
+                );
+                self.start_prompt(
+                    StashPrompt::SaveSelected(request),
+                    vec![
+                        "Selected stash message",
+                        "Type stash to save only these files",
+                    ],
+                );
+            }
+            Action::ClearFilter if matches!(self.view, ViewMode::Files | ViewMode::Branches) => {
+                self.update_name_filter(self.view, "");
+                self.refresh_detail();
+            }
             Action::InteractiveRebase if self.view == ViewMode::History => {
+                if let Some(commit) = self.state.commits.get(self.history_selection) {
+                    let plan = self.repository.prepare_interactive_rebase(&commit.sha)?;
+                    self.rebase_editor = Some(super::editors::RebaseEditor::new(plan));
+                }
+            }
+            Action::RawInteractiveRebase if self.view == ViewMode::History => {
                 if let Some(commit) = self.state.commits.get(self.history_selection) {
                     let plan = self.repository.prepare_interactive_rebase(&commit.sha)?;
                     let todo = plan.todo.clone();

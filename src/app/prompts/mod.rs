@@ -115,20 +115,8 @@ impl App {
         let v = prompt.values;
         let submitted = match prompt.kind {
             PromptKind::ListFilter(view) => {
-                self.list_filter = v[0].to_lowercase();
-                self.filter_view = Some(view);
-                let visible = self.visible_indices();
-                if !visible.contains(&self.selection())
-                    && let Some(index) = visible.first()
-                {
-                    self.select(*index);
-                }
+                self.update_name_filter(view, &v[0]);
                 self.refresh_detail();
-                self.notify(format!(
-                    "Filter: {} ({} matches)",
-                    self.list_filter,
-                    visible.len()
-                ));
                 Submitted::Done
             }
             PromptKind::CommandPalette => self.submit_command_palette(&v[0])?,

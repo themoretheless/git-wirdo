@@ -128,3 +128,41 @@ the command's exit code. The todo editor also accepts `;` separators for native
 Windows input, whose crossterm backend does not emit Unix bracketed-paste events.
 The ConPTY scenario uses this native input path; Unix PTY still checks multiline
 bracketed paste.
+
+
+## Visual editing and selected stash follow-up
+
+| ID | Reproduction / gap | Change | Verification |
+| --- | --- | --- | --- |
+| V1 | Line staging required manually typing ordinals. | Space opens a cursor/range editor, with selected side-specific s/u and exact-diff guards. Structural patches retain whole-hunk operations. | `visual_editing`, 20,000-change narrow-window rendering, Unix PTY and Windows ConPTY independently inspect index and working files. |
+| V2 | Rebase required rewriting raw full-ID todo text. | Visual reorder, pick/squash/fixup controls, abbreviated IDs/subjects, group preview and typed confirmation; raw palette remains available. | Guarded repository tests plus visual cancellation/confirmation/reorder tests and native terminal scenarios. |
+| V3 | Filtering another list replaced the previous filter and required Enter. | Independent Files/Branches filters update matches while typing without Git reads; Enter/Esc loads detail; Esc outside input clears active filter. | Independent live-filter/state and shortcut-input tests, PTY/ConPTY. Filters remain transient per repository. |
+| V4 | Stash saved everything; native pathspec stash also captures unrelated staged changes in its trees. | A private index builds selected-only index/working/untracked stash trees, stores recovery copy before guarded selected cleanup. | Real Git tree/index/file oracles cover mixed staged/working/untracked, renames, deletions, added/ignored files, stale requests and injected pre/post-store failure. Linux also tests native non-UTF8 paths. |
+
+No latency improvement is claimed. The line viewport builds only visible rows;
+existing detail/list rendering is skipped behind editors. Rebase preview describes
+commit groups rather than predicting conflicts or resulting SHAs. Selected stash
+requires HEAD and regular files/symlinks, refuses intent-to-add and submodules,
+and does not promise atomic cleanup against concurrent external Git/filesystem
+changes. Cancellation or cleanup failure after store retains a recoverable stash.
+Worker-panic/failed-reload recovery closes editors so they cannot intercept refresh.
+Earlier F1/F3 limitations above describe the previous accepted package; this
+follow-up replaces its single filter and raw-only todo interface.
+
+The concurrent auto-reload change from PR #6 is included. Polling explicitly waits
+while either visual editor is open, then resumes after close; captured selections
+still use exact-diff/HEAD checks at mutation. The integration regression checks
+both editors, retained drafts and the subsequent external-file reload.
+
+Validation note: local checks use installed Rust 1.98.1 because default nightly
+Cargo became unavailable during the run. Parallel local PTY runs reached the
+unchanged 20-second deadline while Git was still running; all 20 terminal workflows
+passed sequentially. The large Unicode snapshot exposed a test-reader defect:
+continuation cells of wide graphemes were interpreted as spaces. The reader now
+advances by terminal cell width, retaining exact-text assertions and adding an
+independent wide/combining/emoji/real-space decoding check.
+
+The ConPTY flow returns from Hunks through the existing View files palette entry;
+Tab cycles through Reflog and other views instead of jumping directly to Files.
+The Hunks footer now describes that navigation accurately. Git/index/stash oracles
+and terminal deadlines are unchanged.

@@ -16,6 +16,9 @@ const MIN_HEIGHT: u16 = 16;
 pub struct Ui {
     lists: [ListState; ViewMode::ALL.len()],
     detail: DetailCache,
+    line_editor: ListState,
+    rebase_editor: ListState,
+    rebase_preview: ListState,
 }
 
 /// The detail text last rendered and its escaped form; large patches are escaped once.
@@ -59,9 +62,79 @@ impl Ui {
             .areas(body);
 
         render_header(frame, header, app);
-        self.render_list(frame, list, app);
-        render_detail(frame, detail, app, &mut self.detail);
+        if app.line_editor.is_none() && app.rebase_editor.is_none() {
+            self.render_list(frame, list, app);
+            render_detail(frame, detail, app, &mut self.detail);
+        }
         render_footer(frame, footer, app);
+        if let Some(editor) = &app.line_editor {
+            let (rows, cursor) = editor.rows(usize::from(body.height.saturating_sub(2)));
+            frame.render_widget(Clear, body);
+            let items = rows
+                .iter()
+                .map(|row| ListItem::new(safe_text(row)))
+                .collect::<Vec<_>>();
+            let widget = List::new(items)
+                .block(Block::default().borders(Borders::ALL).title(format!(
+                    "Select lines | {} selected | {}",
+                    editor.selection().len(),
+                    display_path(&editor.hunk.file.path)
+                )))
+                .highlight_style(Style::default().fg(Color::Yellow))
+                .highlight_symbol("> ");
+            *self.line_editor.offset_mut() = 0;
+            self.line_editor.select(Some(cursor));
+            frame.render_stateful_widget(widget, body, &mut self.line_editor);
+        }
+        if let Some(editor) = &app.rebase_editor {
+            frame.render_widget(Clear, body);
+            let [todo, preview] = Layout::default()
+                .direction(Direction::Horizontal)
+                .constraints([Constraint::Percentage(50), Constraint::Percentage(50)])
+                .areas(body);
+            let display_rows = editor.display_rows();
+            let items = display_rows
+                .iter()
+                .map(|row| ListItem::new(safe_text(row)))
+                .collect::<Vec<_>>();
+            let widget = List::new(items)
+                .block(
+                    Block::default()
+                        .borders(Borders::ALL)
+                        .title("Interactive rebase | oldest first"),
+                )
+                .highlight_style(Style::default().fg(Color::Yellow))
+                .highlight_symbol("> ");
+            self.rebase_editor.select(Some(editor.cursor));
+            frame.render_stateful_widget(widget, todo, &mut self.rebase_editor);
+            if editor.preview {
+                let rows = editor.result();
+                self.rebase_preview
+                    .select(Some(editor.preview_row.min(rows.len().saturating_sub(1))));
+                let items = rows
+                    .iter()
+                    .map(|row| ListItem::new(safe_text(row)))
+                    .collect::<Vec<_>>();
+                let widget = List::new(items)
+                    .block(
+                        Block::default()
+                            .borders(Borders::ALL)
+                            .title("Rebase preview | PgUp/PgDn"),
+                    )
+                    .highlight_style(Style::default().fg(Color::Cyan));
+                frame.render_stateful_widget(widget, preview, &mut self.rebase_preview);
+            } else {
+                let text = "j/k select commit\nJ/K move commit\np pick, s squash, f fixup\nv preview resulting groups\nPgUp/PgDn scroll preview\nEnter review and confirm\nEsc cancel\n\nSquash combines messages.\nFixup discards its message.\nOriginal HEAD is saved for recovery.";
+                frame.render_widget(
+                    Paragraph::new(text).wrap(Wrap { trim: false }).block(
+                        Block::default()
+                            .borders(Borders::ALL)
+                            .title("Rebase preview"),
+                    ),
+                    preview,
+                );
+            }
+        }
         if let Some(prompt) = &app.prompt
             && matches!(prompt.kind, PromptKind::CommandPalette)
         {
@@ -71,17 +144,22 @@ impl Ui {
 
     fn render_list(&mut self, frame: &mut Frame<'_>, area: Rect, app: &App) {
         let (items, has_selection) = list_items(app);
-        let list = List::new(items)
-            .block(Block::default().borders(Borders::ALL).title(
-                if app.filter_view == Some(app.view) && !app.list_filter.is_empty() {
-                    format!("Selection | filter: {}", safe_text(&app.list_filter))
-                } else {
-                    "Selection".into()
-                },
-            ))
-            .highlight_symbol("> ");
+        let list =
+            List::new(items)
+                .block(Block::default().borders(Borders::ALL).title(
+                    if !app.name_filter().is_empty() {
+                        format!(
+                            "Selection | filter: {} | {} matches",
+                            safe_text(app.name_filter()),
+                            app.visible_indices().len()
+                        )
+                    } else {
+                        "Selection".into()
+                    },
+                ))
+                .highlight_symbol("> ");
         let state = &mut self.lists[app.view.index()];
-        let selection = if app.filter_view == Some(app.view) && !app.list_filter.is_empty() {
+        let selection = if !app.name_filter().is_empty() {
             app.visible_indices()
                 .iter()
                 .position(|i| *i == app.selection())
@@ -124,7 +202,7 @@ fn render_detail(frame: &mut Frame<'_>, area: Rect, app: &App, cache: &mut Detai
     let title = if app.view == ViewMode::Files {
         let files = app.displayed_files();
         format!(
-            "{} | Seen {}/{}",
+            "{} | Seen {}/{} | Stash selected {}",
             if app.browse_tracked {
                 "Tracked files (read-only)"
             } else if app.upstream_comparison {
@@ -133,7 +211,8 @@ fn render_detail(frame: &mut Frame<'_>, area: Rect, app: &App, cache: &mut Detai
                 "Working changes"
             },
             files.iter().filter(|file| app.file_seen(file)).count(),
-            files.len()
+            files.len(),
+            app.stash_files.len()
         )
     } else {
         "Details".into()
@@ -151,6 +230,10 @@ fn render_footer(frame: &mut Frame<'_>, area: Rect, app: &App) {
             prompt.labels[prompt.values.len()],
             safe_text(&prompt.text).replace('\n', "↵")
         )
+    } else if app.line_editor.is_some() {
+        "Select lines: j/k move | PgUp/Dn, Home/End jump | Space toggle | v range | s stage | u unstage | Esc cancel".into()
+    } else if app.rebase_editor.is_some() {
+        "Rebase: j/k select | J/K reorder | p pick | s squash | f fixup | v preview | PgUp/Dn preview | Enter confirm | Esc cancel".into()
     } else if app.searching {
         format!(
             "Find: {}_ (Enter search, Esc cancel)",
@@ -221,7 +304,7 @@ fn shortcuts(view: ViewMode) -> &'static str {
             "enter open | N initialize | C clone Git | D forget entry | O open path"
         }
         ViewMode::Hunks => {
-            "= select lines | s stage hunk | u unstage hunk | d staged/unstaged | tab files"
+            "Space select lines | = numbers | s stage hunk | u unstage hunk | d staged/unstaged | tab next view"
         }
         ViewMode::Tags => "N create | D delete local | W publish | X delete remote | r refresh",
         ViewMode::Remotes => {
@@ -230,7 +313,7 @@ fn shortcuts(view: ViewMode) -> &'static str {
         ViewMode::RemoteBranches => "enter track | f fetch | U upstream | W publish",
         ViewMode::Stashes => "S save | y apply | T pop | D drop | r refresh",
         ViewMode::Files => {
-            "\\ filter | J tracked/changes | h history | Q blame | s stage | u unstage | i hunks | w restore index | D discard HEAD | c commit | b branch | f fetch | p pull | P push"
+            "\\ filter | Space mark | $ stash selected | J tracked/changes | h history | Q blame | s stage | u unstage | i hunks | w restore index | D discard HEAD | c commit | b branch | f fetch | p pull | P push"
         }
         ViewMode::History => {
             "~ interactive rebase | ! export patch | g graph/patch | + older | Y cherry-pick | Z revert | F reset"
@@ -361,7 +444,12 @@ fn list_items(app: &App) -> (Vec<ListItem<'static>>, bool) {
                         (false, false) => "  ",
                     };
                     format!(
-                        "[{marker}] [{}] {}{}",
+                        "{}[{marker}] [{}] {}{}",
+                        if app.stash_files.contains(&file.path) {
+                            "[x] "
+                        } else {
+                            ""
+                        },
                         file.status,
                         file.label(),
                         if app.file_seen(file) { " [seen]" } else { "" }
@@ -409,7 +497,7 @@ fn list_items(app: &App) -> (Vec<ListItem<'static>>, bool) {
             "No conflicted files",
         ),
     };
-    let lines = if app.filter_view == Some(app.view) && !app.list_filter.is_empty() {
+    let lines = if !app.name_filter().is_empty() {
         app.visible_indices()
             .into_iter()
             .filter_map(|i| lines.get(i).cloned())

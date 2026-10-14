@@ -169,3 +169,27 @@ impl Hunk {
             .join("\n")
     }
 }
+
+impl Hunk {
+    pub fn supports_line_selection(&self) -> bool {
+        !self
+            .patch
+            .split_inclusive(|b| *b == b'\n')
+            .take_while(|l| !l.starts_with(b"@@ "))
+            .any(|l| l.starts_with(b"new file mode") || l.starts_with(b"deleted file mode"))
+    }
+    /// Physical patch rows corresponding to one-based selectable changes.
+    pub fn changed_rows(&self) -> Vec<usize> {
+        let mut body = false;
+        self.patch
+            .split_inclusive(|b| *b == b'\n')
+            .enumerate()
+            .filter_map(|(index, line)| {
+                if line.starts_with(b"@@ ") {
+                    body = true;
+                }
+                (body && matches!(line.first(), Some(b'+' | b'-'))).then_some(index)
+            })
+            .collect()
+    }
+}

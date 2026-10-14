@@ -11,6 +11,7 @@ use crate::model::{ViewMode, display_path};
 #[derive(Debug, Clone)]
 pub enum HistoryPrompt {
     Interactive(crate::git::InteractiveRebase),
+    ConfirmInteractive(crate::git::InteractiveRebase, String),
     ImportPatch,
     ExportCommit(String),
     /// Create a branch at a reflog commit.
@@ -23,6 +24,18 @@ pub enum HistoryPrompt {
 impl HistoryPrompt {
     pub(super) fn submit(self, app: &mut App, v: &[String]) -> Result<Submitted> {
         Ok(match self {
+            Self::ConfirmInteractive(plan, todo) => {
+                ensure!(v[0] == "rebase", "Rebase cancelled");
+                app.rebase_editor = None;
+                let result =
+                    app.refresh_after(|app| app.repository.run_interactive_rebase(&plan, &todo));
+                if app.state.merge_state.in_progress() {
+                    app.view = ViewMode::Conflicts;
+                    app.refresh_detail();
+                }
+                result?;
+                "Interactive rebase completed; original HEAD retained in recovery refs".into()
+            }
             Self::Interactive(plan) => {
                 ensure!(v[1] == "rebase", "Rebase cancelled");
                 let result =

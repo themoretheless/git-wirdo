@@ -1,5 +1,6 @@
 mod interactive;
 pub use interactive::InteractiveRebase;
+pub use stash::StashFilesRequest;
 use std::ffi::{OsStr, OsString};
 use std::fs;
 use std::io::Read;

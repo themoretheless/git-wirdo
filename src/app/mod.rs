@@ -5,6 +5,7 @@
 mod access;
 mod actions;
 mod detail;
+pub(crate) mod editors;
 mod keys;
 mod prompts;
 mod selection;
@@ -73,8 +74,11 @@ pub struct App {
     pub(crate) tags: Listed<crate::model::TagEntry>,
     pub(crate) hunks: Listed<crate::patch::Hunk>,
     pub(crate) staged_hunks: bool,
-    pub(crate) list_filter: String,
-    pub(crate) filter_view: Option<ViewMode>,
+    pub(crate) file_filter: String,
+    pub(crate) branch_filter: String,
+    pub(crate) line_editor: Option<editors::LineEditor>,
+    pub(crate) rebase_editor: Option<editors::RebaseEditor>,
+    pub(crate) stash_files: std::collections::HashSet<PathBuf>,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
@@ -150,8 +154,11 @@ impl App {
             tags: Listed::default(),
             hunks: Listed::default(),
             staged_hunks: false,
-            list_filter: String::new(),
-            filter_view: None,
+            file_filter: String::new(),
+            branch_filter: String::new(),
+            line_editor: None,
+            rebase_editor: None,
+            stash_files: Default::default(),
         };
         app.tracking = app.load_tracking();
         app.refresh_detail();
@@ -210,6 +217,8 @@ impl App {
             }
         }
         self.seen = valid;
+        self.stash_files
+            .retain(|path| self.state.files.iter().any(|f| &f.path == path));
         if self.browse_tracked {
             self.tracked_files = self.load_tracked_files()?;
         }
@@ -228,8 +237,7 @@ impl App {
         self.restore_selection(self.view, selected.as_ref());
         let (selection, len) = self.cursor();
         clamp_to(selection, len);
-        if self.filter_view == Some(self.view)
-            && !self.list_filter.is_empty()
+        if !self.name_filter().is_empty()
             && !self.visible_indices().contains(&self.selection())
             && let Some(index) = self.visible_indices().first().copied()
         {
@@ -335,7 +343,7 @@ impl App {
     }
 
     pub(super) fn move_selection(&mut self, delta: isize) {
-        if self.filter_view == Some(self.view) && !self.list_filter.is_empty() {
+        if !self.name_filter().is_empty() {
             let visible = self.visible_indices();
             let current = visible
                 .iter()
@@ -428,16 +436,14 @@ impl App {
     }
 
     pub fn visible_indices(&self) -> Vec<usize> {
-        if self.filter_view != Some(self.view) || self.list_filter.is_empty() {
+        if self.name_filter().is_empty() {
             return match self.view {
                 ViewMode::Files => (0..self.displayed_files().len()).collect(),
                 ViewMode::Branches => (0..self.state.branches.len()).collect(),
                 _ => Vec::new(),
             };
         }
-        let matches = |name: &str| {
-            self.filter_view != Some(self.view) || name.to_lowercase().contains(&self.list_filter)
-        };
+        let matches = |name: &str| name.to_lowercase().contains(self.name_filter());
         match self.view {
             ViewMode::Files => self
                 .displayed_files()

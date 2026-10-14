@@ -8,6 +8,7 @@ use crate::model::StashEntry;
 #[derive(Debug, Clone)]
 pub enum StashPrompt {
     Save,
+    SaveSelected(crate::git::StashFilesRequest),
     /// Apply the stash; `true` also removes it on success.
     Apply(StashEntry, bool),
     Drop(StashEntry),
@@ -16,6 +17,12 @@ pub enum StashPrompt {
 impl StashPrompt {
     pub(super) fn submit(self, app: &mut App, v: &[String]) -> Result<Submitted> {
         Ok(match self {
+            Self::SaveSelected(request) => {
+                ensure!(v[1] == "stash", "Selective stash cancelled");
+                app.refresh_after(|app| app.repository.save_stash_files(&request, &v[0]))?;
+                app.stash_files.clear();
+                "Saved selected files in stash".into()
+            }
             Self::Save => {
                 app.refresh_after(|app| app.repository.save_stash(&v[0]))?;
                 "Saved stash including untracked files".into()

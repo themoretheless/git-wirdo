@@ -591,25 +591,49 @@ scrolling counts terminal cells for wide and combining Unicode characters.
 See [the improvement register](docs/IMPROVEMENTS.md) for reproductions, measured
 performance, acceptance evidence and candidates for the next feature stage.
 
-### Name filters, line staging and interactive rebase
+### Name filters, visual staging and interactive rebase
 
-- `\` in Files or Branches opens a case-insensitive name filter. Blank input
-  clears it; the Selection title shows the active filter. `j/k` move through
-  matching entries. `/` still searches commits or detail text. Filtering another
-  list replaces the previous filter; filters are local to the open repository.
-- `i` opens a file's text hunks. `=` accepts space-separated changed-line numbers
-  shown beside `+` and `-` lines. Select both sides to stage a replacement, or
-  either side independently. In staged mode (`d`) the same action unstages lines.
-  Working files stay unchanged; a changed diff requires refresh and reselection.
-  Binary, rename, mode, new-file and deleted-file changes use whole-file/hunk
-  operations instead.
-- In History select the **base commit to keep**, then `~`. Edit the subsequent
-  oldest-first todo using `pick`, `squash`, or `fixup` and full commit IDs. Separate entries with a newline or `;`. Reorder
-  entries freely; include every prepared commit exactly once. Alt-Enter inserts a
-  newline, Ctrl-U clears, Esc cancels. Unix supports bracketed multiline paste;
-  on native Windows use `;` between pasted entries.
-  Confirm with `rebase`. This editor accepts 1–200 commits in clean, linear,
-  attached-branch history. Rewriting published commits still requires coordinated
-  downstream handling; this action does not push. Original HEAD is retained in
-  recovery refs visible through Reflog. On conflicts use the existing Conflicts
-  view: resolve and `e` continue, `K` skip, or `x` abort.
+- `\` in Files or Branches opens a live case-insensitive name filter. Each list
+  keeps its own filter within the open repository. The title shows match count;
+  filtering does not run Git while typing. Ctrl-U clears the input. Enter applies
+  or Esc closes the input; outside input, Esc clears the current list's filter.
+  `j/k` navigate matches, while `/` retains detail/history search.
+- `i` opens a file's hunks; **Space** opens the line editor. `j/k` or arrows move
+  between changed lines (PgUp/PgDn and Home/End jump), Space toggles selection, and `v` starts/finishes a range.
+  `s` stages selected unstaged lines; in staged mode (`d`), `u` unstages them.
+  Esc cancels without changing files or the index. `=` retains numeric selection.
+  Both sides of a replacement can be selected together or separately. The exact
+  original diff is rechecked before applying; stale selections require refresh.
+  Binary, rename, mode, new-file and deleted-file changes retain whole-file/hunk
+  operations. The editor renders a bounded viewport for large patches.
+- In History select the **base commit to keep**, then `~`. The visual todo lists
+  subsequent commits oldest first, with abbreviated IDs and subjects. `j/k`
+  select, `J/K` move a commit, and `p/s/f` choose pick/squash/fixup. `v` previews
+  the resulting groups (PgUp/PgDn scroll the preview); fixup discards its message and squash combines messages.
+  The preview does not predict conflicts or new commit IDs. Enter opens typed
+  `rebase` confirmation; Esc returns to editing or closes the editor. These
+  controls work through native Windows input without multiline paste.
+  The command palette retains **Edit raw rebase todo**, accepting full IDs and
+  newline/`;` separators (native Windows paste uses `;`). The editor accepts
+  1–200 commits in clean, linear, attached-branch history, always retaining every
+  commit exactly once. Original HEAD is saved in recovery refs visible through
+  Reflog. Conflicts use existing `e` continue, `K` skip and `x` abort controls.
+
+### Stash selected files
+
+In working Files, Space marks/unmarks files; `$` saves the marked set, or the
+current visible file when nothing is marked. Marks survive filtering and refresh
+while the paths still exist. The detail preview lists all selected paths, including
+hidden marks, before a message and typed `stash` confirmation. `S` retains saving
+all changes.
+
+Selected stash uses a private index to capture only selected tracked and untracked
+files. Other staged/working changes stay on disk and are excluded from both stash
+trees. Renames include both paths; index and working versions are saved separately.
+Before cleanup, selected contents, index entries and HEAD are checked again. The
+stash is stored before changing real files/index, so a cleanup error or cancellation
+can leave a recoverable stash and partially cleaned selection: refresh and inspect
+before retrying. Private index files are cleaned after the operation. Intent-to-add
+files, submodule directories and unfinished Git operations are refused; stage/reset
+intent-to-add files first. Ignored files are included only when already tracked
+and explicitly selected. CLI flags and persisted settings remain compatible.

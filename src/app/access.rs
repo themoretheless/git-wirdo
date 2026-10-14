@@ -130,6 +130,28 @@ impl App {
         self.review_pr.as_ref()
     }
 
+    pub fn line_editor_open(&self) -> bool {
+        self.line_editor.is_some()
+    }
+    pub fn selected_line_numbers(&self) -> Vec<usize> {
+        self.line_editor
+            .as_ref()
+            .map(|e| e.selection())
+            .unwrap_or_default()
+    }
+    pub fn rebase_editor_open(&self) -> bool {
+        self.rebase_editor.is_some()
+    }
+    pub fn rebase_todo(&self) -> Option<String> {
+        self.rebase_editor.as_ref().map(|e| e.todo())
+    }
+    pub fn rebase_preview(&self) -> Option<String> {
+        self.rebase_editor.as_ref().map(|e| e.result().join("\n"))
+    }
+    pub fn selected_stash_file_count(&self) -> usize {
+        self.stash_files.len()
+    }
+
     pub fn staged_hunks(&self) -> bool {
         self.staged_hunks
     }
@@ -181,7 +203,14 @@ impl App {
 
     /// Close any open prompt or palette without submitting it, as Esc does.
     pub fn cancel_prompt(&mut self) {
+        let filtering = self
+            .prompt
+            .as_ref()
+            .is_some_and(|p| matches!(p.kind, super::PromptKind::ListFilter(_)));
         self.prompt = None;
+        if filtering {
+            self.refresh_detail();
+        }
     }
 
     /// History window and graph toggle, as restored from saved navigation.
