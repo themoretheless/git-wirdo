@@ -151,6 +151,14 @@ fn main() -> Result<()> {
         }
         return Ok(());
     }
+    // --no-state disables persistence entirely; otherwise the configured state file is used.
+    let state_path = || -> Result<Option<PathBuf>> {
+        if cli.no_state {
+            Ok(None)
+        } else {
+            settings_path().map(Some)
+        }
+    };
     let explicit_repo = cli.repo.is_some();
     let path = match &cli.repo {
         Some(path) => path.clone(),
@@ -162,17 +170,7 @@ fn main() -> Result<()> {
             .path()?,
         None => env::current_dir().context("Cannot determine the current directory")?,
     };
-    let start = || {
-        welcome::run(
-            path.clone(),
-            if cli.no_state {
-                None
-            } else {
-                Some(settings_path()?)
-            }
-            .as_deref(),
-        )
-    };
+    let start = || welcome::run(path.clone(), state_path()?.as_deref());
     let repository = if cli.start {
         match start()? {
             Some(repository) => repository,
@@ -214,14 +212,7 @@ fn main() -> Result<()> {
     if inspect(&cli, &repository)? {
         return Ok(());
     }
-    terminal::run(
-        repository,
-        if cli.no_state {
-            None
-        } else {
-            Some(settings_path()?)
-        },
-    )
+    terminal::run(repository, state_path()?)
 }
 
 /// Commands that print repository information and exit without the terminal UI.

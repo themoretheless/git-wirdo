@@ -18,6 +18,8 @@ pub enum GitHubPrompt {
     /// Submit a review with the given `gh pr review` verdict flag.
     Review(PullRequest, &'static str),
     Comment(u64),
+    /// Create a repository on GitHub, optionally linking it as a remote without pushing.
+    CreateRepository,
 }
 
 impl GitHubPrompt {
@@ -71,6 +73,10 @@ impl GitHubPrompt {
                 github::review_selected(&root, &pr, verdict, &v[0])?.into()
             }
             Self::Comment(number) => github::comment(&root, number, &v[0])?.into(),
+            Self::CreateRepository => {
+                ensure!(v[3] == "create", "Repository creation cancelled");
+                github::create_repository(&root, &v[0], v[1].trim(), v[2].trim())?.into()
+            }
         })
     }
 }

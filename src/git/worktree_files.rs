@@ -3,7 +3,7 @@ use super::*;
 
 impl Repository {
     pub fn load_state(&self) -> Result<RepoState> {
-        self.load_state_with_history(20)
+        self.load_state_with_history(HISTORY_PAGE)
     }
 
     /// Snapshot status, branches and the first `history_limit` commits in one pass.
@@ -132,21 +132,21 @@ impl Repository {
         if file.conflicted || file.original_path.is_some() || file.status == "??" {
             return Ok(Vec::new());
         }
-        let mut args = vec![
-            "diff",
-            "--no-color",
-            "--no-ext-diff",
-            "--no-textconv",
-            "--no-renames",
-            "--src-prefix=a/",
-            "--dst-prefix=b/",
-            "--unified=3",
-            "--inter-hunk-context=0",
-        ];
+        let mut diff = args(&[
+            &["diff"],
+            PLAIN,
+            &[
+                "--no-renames",
+                "--src-prefix=a/",
+                "--dst-prefix=b/",
+                "--unified=3",
+                "--inter-hunk-context=0",
+            ],
+        ]);
         if staged {
-            args.push("--cached");
+            diff.push("--cached");
         }
-        self.run_paths(&args, &[&file.path])
+        self.run_paths(&diff, &[&file.path])
     }
 
     pub fn hunks(&self, file: &FileEntry, staged: bool) -> Result<Vec<crate::patch::Hunk>> {
@@ -176,20 +176,8 @@ impl Repository {
             return self.untracked_preview(&file.path);
         }
         let paths = file.paths();
-        let staged = self.path_text(
-            &[
-                "diff",
-                "--no-color",
-                "--no-ext-diff",
-                "--no-textconv",
-                "--cached",
-            ],
-            &paths,
-        )?;
-        let unstaged = self.path_text(
-            &["diff", "--no-color", "--no-ext-diff", "--no-textconv"],
-            &paths,
-        )?;
+        let staged = self.path_text(&args(&[&["diff"], PLAIN, &["--cached"]]), &paths)?;
+        let unstaged = self.path_text(&args(&[&["diff"], PLAIN]), &paths)?;
         let mut chunks = Vec::new();
         if !staged.is_empty() {
             chunks.push(format!("[STAGED]\n{staged}"));
@@ -237,14 +225,7 @@ impl Repository {
     pub fn upstream_detail(&self, file: &FileEntry) -> Result<String> {
         let base = self.upstream_base()?;
         self.path_text(
-            &[
-                "diff",
-                "--no-color",
-                "--no-ext-diff",
-                "--no-textconv",
-                "--no-renames",
-                &base,
-            ],
+            &args(&[&["diff"], PLAIN, &["--no-renames", &base]]),
             &[&file.path],
         )
     }
@@ -312,10 +293,7 @@ impl Repository {
     }
 
     pub fn conflict_detail(&self, path: &Path) -> Result<String> {
-        self.path_text(
-            &["diff", "--no-color", "--no-ext-diff", "--no-textconv"],
-            &[path],
-        )
+        self.path_text(&args(&[&["diff"], PLAIN]), &[path])
     }
 
     pub fn stage(&self, file: &FileEntry) -> Result<()> {

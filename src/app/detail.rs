@@ -16,7 +16,7 @@ impl App {
                 _ => Ok("No PR file selected; use i in PullRequests to load reviewed files.".into()),
             },
             ViewMode::Reflog => match self.reflog.selected() {
-                Some(entry) => self.repository.commit_detail(&crate::model::CommitEntry { sha: entry.sha.clone(), short_sha: String::new(), date: String::new(), author: String::new(), subject: entry.subject.clone() }),
+                Some(entry) => self.repository.commit_detail(&entry.sha),
                 None => Ok("No reflog entry selected".into()),
             },
             ViewMode::Hunks => Ok(self.hunks.selected().map(|hunk| format!("{} hunk {}/{}\n{}\n\n{}", if hunk.staged { "Staged" } else { "Unstaged" }, self.hunks.selection + 1, self.hunks.items.len(), display_path(&hunk.file.path), String::from_utf8_lossy(&hunk.patch))).unwrap_or_else(|| "No text hunks. d switches staged/unstaged. Use full-file staging for untracked, binary, rename or mode changes.".into())),
@@ -56,7 +56,7 @@ impl App {
                 Ok(self.history_graph.lines().map(|line| format!("{}{}", if selected.is_some_and(|sha| line.contains(sha)) { "> " } else { "  " }, line)).collect::<Vec<_>>().join("\n"))
             }
             ViewMode::History => match self.state.commits.get(self.history_selection) {
-                Some(commit) => self.repository.commit_detail(commit),
+                Some(commit) => self.repository.commit_detail(&commit.sha),
                 None => Ok("No commit selected".to_owned()),
             },
             ViewMode::Branches => Ok(match self.state.branches.get(self.branch_selection) {

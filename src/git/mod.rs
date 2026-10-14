@@ -7,9 +7,20 @@ use std::sync::Arc;
 
 use anyhow::{Context, Result, bail, ensure};
 
-use crate::model::{BranchEntry, CommitEntry, FileEntry, MergeState, RepoState, display_path};
+use crate::model::{
+    BranchEntry, CommitEntry, FileEntry, MergeState, Operation, RepoState, display_path,
+};
 
 const PREVIEW_LIMIT: usize = 256 * 1024;
+/// Commits initially loaded for history; `+` extends the window.
+pub const HISTORY_PAGE: usize = 20;
+/// Output must be machine-readable: no colors, external diff drivers or textconv filters.
+const PLAIN: &[&str] = &["--no-color", "--no-ext-diff", "--no-textconv"];
+
+/// Join argument groups so shared flag sets are declared once.
+fn args<'a>(groups: &[&[&'a str]]) -> Vec<&'a str> {
+    groups.concat()
+}
 
 #[derive(Debug, Clone)]
 pub struct Repository {
@@ -386,6 +397,27 @@ where
         .output(&mut git_command(path, args), None)
         .with_context(|| format!("Failed to execute Git in {}", display_path(path)))?;
     checked(output)
+}
+
+/// NUL-terminated records of exactly `N` fields, as produced by `-z --format=...%x00...`.
+fn nul_records<const N: usize>(bytes: &[u8], what: &str) -> Result<Vec<[String; N]>> {
+    let text = String::from_utf8_lossy(bytes);
+    let fields: Vec<_> = text.split_terminator('\0').collect();
+    let (records, remainder) = fields.as_chunks::<N>();
+    ensure!(remainder.is_empty(), "Invalid {what} record from Git");
+    Ok(records.iter().map(|r| r.map(str::to_owned)).collect())
+}
+
+/// Newline-terminated records whose `N` fields are separated by NUL (`%00` in for-each-ref).
+fn line_records<const N: usize>(text: &str, what: &str) -> Result<Vec<[String; N]>> {
+    text.lines()
+        .map(|line| {
+            let fields: Vec<_> = line.splitn(N, '\0').collect();
+            <[&str; N]>::try_from(fields)
+                .map(|r| r.map(str::to_owned))
+                .map_err(|_| anyhow::anyhow!("Invalid {what} record from Git"))
+        })
+        .collect()
 }
 
 fn utf8_line(bytes: &[u8]) -> Result<String> {

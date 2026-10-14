@@ -106,7 +106,7 @@ impl App {
             view: ViewMode::Files,
             file_selection: 0,
             history_selection: 0,
-            history_limit: 20,
+            history_limit: crate::git::HISTORY_PAGE,
             graph_visible: false,
             history_graph: String::new(),
             reflog: Listed::default(),

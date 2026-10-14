@@ -546,6 +546,21 @@ impl App {
                     );
                 }
             }
+            Action::New if self.view == ViewMode::GitHubRepositories => {
+                self.detail_text = "Create a GitHub repository; a remote name links it to this \
+                                    checkout without pushing"
+                    .into();
+                self.detail_scroll = 0;
+                self.start_prompt(
+                    GitHubPrompt::CreateRepository,
+                    vec![
+                        "Repository name (name or owner/name)",
+                        "Visibility: private, public or internal",
+                        "Remote name to add for this checkout (blank = none)",
+                        "Type create to confirm",
+                    ],
+                );
+            }
             Action::OpenRepository => {
                 self.start_prompt(RepositoryPrompt::Open, vec!["Repository path"])
             }

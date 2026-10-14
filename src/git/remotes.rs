@@ -2,17 +2,37 @@
 use super::*;
 
 impl Repository {
+    /// One `remote -v` call lists every fetch and push URL; URLs may contain spaces, so the
+    /// trailing kind marker is split off from the right.
     pub fn remotes(&self) -> Result<Vec<crate::model::RemoteEntry>> {
-        self.text(&["remote"])?
-            .lines()
-            .map(|name| {
-                Ok(crate::model::RemoteEntry {
-                    name: name.into(),
-                    fetch_urls: self.text(&["remote", "get-url", "--all", name])?,
-                    push_urls: self.text(&["remote", "get-url", "--push", "--all", name])?,
-                })
-            })
-            .collect()
+        let mut remotes: Vec<crate::model::RemoteEntry> = Vec::new();
+        for line in self.text(&["remote", "-v"])?.lines() {
+            let (name, rest) = line
+                .split_once('\t')
+                .context("Invalid remote record from Git")?;
+            let (url, kind) = rest
+                .rsplit_once(' ')
+                .context("Invalid remote URL record from Git")?;
+            let entry = match remotes.iter_mut().position(|remote| remote.name == name) {
+                Some(index) => &mut remotes[index],
+                None => {
+                    remotes.push(crate::model::RemoteEntry {
+                        name: name.to_owned(),
+                        fetch_urls: String::new(),
+                        push_urls: String::new(),
+                    });
+                    remotes.last_mut().expect("just pushed")
+                }
+            };
+            let urls = match kind {
+                "(fetch)" => &mut entry.fetch_urls,
+                "(push)" => &mut entry.push_urls,
+                _ => bail!("Unknown remote URL kind {kind}"),
+            };
+            urls.push_str(url);
+            urls.push('\n');
+        }
+        Ok(remotes)
     }
 
     pub(super) fn verify_remote(&self, name: &str) -> Result<()> {

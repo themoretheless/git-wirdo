@@ -37,18 +37,14 @@ impl Repository {
             "--date=short",
             "--format=%H%x00%h%x00%ad%x00%an%x00%s",
         ])?;
-        let text = String::from_utf8_lossy(&bytes);
-        let fields: Vec<_> = text.split_terminator('\0').collect();
-        let (records, remainder) = fields.as_chunks::<5>();
-        ensure!(remainder.is_empty(), "Invalid commit record from Git");
-        Ok(records
-            .iter()
-            .map(|parts| CommitEntry {
-                sha: parts[0].to_owned(),
-                short_sha: parts[1].to_owned(),
-                date: parts[2].to_owned(),
-                author: parts[3].to_owned(),
-                subject: parts[4].to_owned(),
+        Ok(nul_records::<5>(&bytes, "commit")?
+            .into_iter()
+            .map(|[sha, short_sha, date, author, subject]| CommitEntry {
+                sha,
+                short_sha,
+                date,
+                author,
+                subject,
             })
             .collect())
     }
@@ -148,19 +144,17 @@ impl Repository {
             "File history limit must be 1..=10000"
         );
         self.path_text(
-            &[
-                "log",
-                "--follow",
-                "--no-color",
-                "--no-show-signature",
-                "--no-ext-diff",
-                "--no-textconv",
-                "--format=fuller",
-                "--patch",
-                "--stat",
-                &format!("--max-count={limit}"),
-                "HEAD",
-            ],
+            &args(&[
+                &["log", "--follow", "--no-show-signature"],
+                PLAIN,
+                &[
+                    "--format=fuller",
+                    "--patch",
+                    "--stat",
+                    &format!("--max-count={limit}"),
+                    "HEAD",
+                ],
+            ]),
             &[path],
         )
     }
@@ -181,20 +175,19 @@ impl Repository {
         )
     }
 
-    pub fn commit_detail(&self, commit: &CommitEntry) -> Result<String> {
-        self.text(&[
-            "show",
-            "--no-color",
-            "--no-show-signature",
-            "--no-ext-diff",
-            "--no-textconv",
-            "--stat",
-            "--patch",
-            "--decorate=short",
-            "--format=fuller",
-            &commit.sha,
-            "--",
-        ])
+    pub fn commit_detail(&self, sha: &str) -> Result<String> {
+        self.text(&args(&[
+            &["show", "--no-show-signature"],
+            PLAIN,
+            &[
+                "--stat",
+                "--patch",
+                "--decorate=short",
+                "--format=fuller",
+                sha,
+                "--",
+            ],
+        ]))
     }
 
     pub fn commit(&self, message: &str) -> Result<()> {
@@ -241,17 +234,14 @@ impl Repository {
         } else {
             Vec::new()
         };
-        let text = String::from_utf8_lossy(&bytes);
-        let fields: Vec<_> = text.split_terminator('\0').collect();
-        let (records, remainder) = fields.as_chunks::<3>();
-        ensure!(remainder.is_empty(), "Invalid reflog record from Git");
-        let mut entries: Vec<_> = records
-            .iter()
-            .map(|p| crate::model::ReflogEntry {
-                sha: p[0].into(),
-                selector: p[1].into(),
-                subject: p[2].into(),
-            })
+        let entry = |[sha, selector, subject]: [String; 3]| crate::model::ReflogEntry {
+            sha,
+            selector,
+            subject,
+        };
+        let mut entries: Vec<_> = nul_records::<3>(&bytes, "reflog")?
+            .into_iter()
+            .map(entry)
             .collect();
         // Persistent pre-reset references remain discoverable even after HEAD reflog expires.
         let backups = self.text(&[
@@ -261,18 +251,11 @@ impl Repository {
             "--format=%(objectname)%00%(refname)%00%(subject)",
             "refs/git-wirdo/recovery/",
         ])?;
-        for line in backups.lines() {
-            let fields: Vec<_> = line.split('\0').collect();
-            ensure!(
-                fields.len() == 3,
-                "Invalid recovery reference record from Git"
-            );
-            entries.push(crate::model::ReflogEntry {
-                sha: fields[0].into(),
-                selector: fields[1].into(),
-                subject: fields[2].into(),
-            });
-        }
+        entries.extend(
+            line_records::<3>(&backups, "recovery reference")?
+                .into_iter()
+                .map(entry),
+        );
         Ok(entries)
     }
 
@@ -453,19 +436,13 @@ impl Repository {
             state.conflicts.is_empty(),
             "Resolve and stage all conflicts before continuing"
         );
-        if state.am_in_progress {
-            self.git(["am", "--continue"])?;
-        } else if state.rebase_in_progress {
-            self.git(["rebase", "--continue"])?;
-        } else if state.cherry_pick_in_progress {
-            self.git(["cherry-pick", "--continue"])?;
-        } else if state.revert_in_progress {
-            self.git(["revert", "--continue"])?;
-        } else if state.merge_in_progress {
-            self.git(["commit", "--no-edit"])?;
-        } else {
-            bail!("No Git operation in progress");
-        }
+        let operation = state.operation().context("No Git operation in progress")?;
+        // A merge has no --continue; committing the resolved index finishes it.
+        let command = match operation {
+            Operation::Merge => ["commit", "--no-edit"],
+            other => [other.command(), "--continue"],
+        };
+        self.git(command)?;
         Ok(())
     }
 
@@ -479,20 +456,11 @@ impl Repository {
     }
 
     pub fn abort_operation(&self) -> Result<()> {
-        let state = self.merge_state(&[])?;
-        if state.am_in_progress {
-            self.git(["am", "--abort"])?;
-        } else if state.rebase_in_progress {
-            self.git(["rebase", "--abort"])?;
-        } else if state.cherry_pick_in_progress {
-            self.git(["cherry-pick", "--abort"])?;
-        } else if state.revert_in_progress {
-            self.git(["revert", "--abort"])?;
-        } else if state.merge_in_progress {
-            self.git(["merge", "--abort"])?;
-        } else {
-            bail!("No Git operation in progress");
-        }
+        let operation = self
+            .merge_state(&[])?
+            .operation()
+            .context("No Git operation in progress")?;
+        self.git([operation.command(), "--abort"])?;
         Ok(())
     }
 }

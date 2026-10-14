@@ -151,3 +151,36 @@ Expanded acceptance evidence:
   (199), and Windows (171). Native Windows scenarios confirmed both palette form
   routing and continue/abort of mail conflicts. Repository tests also verified
   abort of a partly applied series and preservation of apply-backend rebase.
+
+## GitHub repository creation and internal consolidation
+
+- Added `N` in GitHubRepositories: create a `private`/`public`/`internal`
+  repository by name, optionally linking the current checkout as a named remote
+  through `gh repo create --source . --remote`. Nothing is pushed; publishing
+  stays an explicit `W`/`P` step. Typed `create` confirmation is required, and
+  cancelled forms never contact GitHub. Covered by transport and TUI fixture tests.
+- Application logic is split into `app/{mod,access,actions,keys,detail}.rs` and
+  `app/prompts/` (one file per domain); Git operations into `git/` by domain. Actions
+  are dispatched per view before global fallbacks; prompt submissions compute one
+  result and reload the repository exactly once, replacing the earlier
+  double refresh after commits, stashes, pulls and branch integration.
+- Shared helpers replace repeated code: list cursor clamping, success/failure
+  reporting, typed confirmations, `Repository::resolve`, the `Operation`
+  enum for continue/abort/summary, and shared machine-readable diff flags.
+- Performance: a refresh loads history once at the current window size instead
+  of three times; the terminal redraws only after input, background progress or
+  settings changes instead of ten times a second; escaped detail text is cached
+  across frames.
+
+Remaining scope audit after this work: no roadmap capability is left
+unimplemented. Items still listed as limits are deliberate or unverifiable here:
+Delta-style agent threads and cloud collaboration are outside a Git client;
+successful review verdicts from a second GitHub account need a second account;
+`stash clear` and recursive submodule reset stay unexposed as safety choices.
+[Consolidation acceptance](https://github.com/themoretheless/git-wirdo/actions/runs/38466337904)
+passed formatting, strict all-target Clippy and every test on Linux (203), macOS
+(202) and Windows (173), including the event-driven redraw through real Unix PTY
+and native ConPTY sessions. Live acceptance on 2026-10-14 created the private
+repository `themoretheless/git-wirdo-live-check` from a throwaway checkout through
+`create_repository`: the checkout gained `origin` fetch/push URLs, GitHub reported
+the repository as empty (no implicit push), and no other remote write occurred.

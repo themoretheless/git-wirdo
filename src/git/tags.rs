@@ -9,30 +9,19 @@ impl Repository {
             "--format=%(refname:strip=2)%00%(objectname)%00%(objecttype)%00%(subject)",
             "refs/tags/",
         ])?;
-        text.lines()
-            .map(|line| {
-                let fields: Vec<_> = line.splitn(4, '\0').collect();
-                ensure!(fields.len() == 4, "Invalid tag record");
-                Ok(crate::model::TagEntry {
-                    name: fields[0].into(),
-                    sha: fields[1].into(),
-                    kind: fields[2].into(),
-                    subject: fields[3].into(),
-                })
+        Ok(line_records::<4>(&text, "tag")?
+            .into_iter()
+            .map(|[name, sha, kind, subject]| crate::model::TagEntry {
+                name,
+                sha,
+                kind,
+                subject,
             })
-            .collect()
+            .collect())
     }
 
     pub fn tag_detail(&self, tag: &crate::model::TagEntry) -> Result<String> {
-        self.text(&[
-            "show",
-            "--no-color",
-            "--no-ext-diff",
-            "--no-textconv",
-            "--stat",
-            &tag.sha,
-            "--",
-        ])
+        self.text(&args(&[&["show"], PLAIN, &["--stat", &tag.sha, "--"]]))
     }
 
     pub fn create_tag(&self, name: &str, target: &str, message: &str) -> Result<()> {

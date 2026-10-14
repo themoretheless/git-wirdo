@@ -4,31 +4,22 @@ use super::*;
 impl Repository {
     pub fn stashes(&self) -> Result<Vec<crate::model::StashEntry>> {
         let bytes = self.git(["stash", "list", "-z", "--format=%gd%x00%H%x00%s"])?;
-        let text = std::str::from_utf8(&bytes).context("Invalid UTF-8 stash metadata")?;
-        let fields: Vec<_> = text.split_terminator('\0').collect();
-        let (records, remainder) = fields.as_chunks::<3>();
-        ensure!(remainder.is_empty(), "Invalid stash list record");
-        Ok(records
-            .iter()
-            .map(|r| crate::model::StashEntry {
-                selector: r[0].into(),
-                sha: r[1].into(),
-                subject: r[2].into(),
+        Ok(nul_records::<3>(&bytes, "stash")?
+            .into_iter()
+            .map(|[selector, sha, subject]| crate::model::StashEntry {
+                selector,
+                sha,
+                subject,
             })
             .collect())
     }
 
     pub fn stash_detail(&self, stash: &crate::model::StashEntry) -> Result<String> {
-        self.text(&[
-            "stash",
-            "show",
-            "--include-untracked",
-            "--patch",
-            "--no-color",
-            "--no-ext-diff",
-            "--no-textconv",
-            &stash.sha,
-        ])
+        self.text(&args(&[
+            &["stash", "show", "--include-untracked", "--patch"],
+            PLAIN,
+            &[&stash.sha],
+        ]))
     }
 
     pub fn save_stash(&self, message: &str) -> Result<()> {

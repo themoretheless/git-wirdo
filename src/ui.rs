@@ -14,6 +14,24 @@ const MIN_HEIGHT: u16 = 16;
 #[derive(Default)]
 pub struct Ui {
     lists: [ListState; ViewMode::ALL.len()],
+    detail: DetailCache,
+}
+
+/// The detail text last rendered and its escaped form; large patches are escaped once.
+#[derive(Default)]
+struct DetailCache {
+    source: String,
+    rendered: String,
+}
+
+impl DetailCache {
+    fn rendered(&mut self, text: &str) -> &str {
+        if self.source != text {
+            self.source = text.to_owned();
+            self.rendered = safe_text(text);
+        }
+        &self.rendered
+    }
 }
 
 impl Ui {
@@ -41,7 +59,7 @@ impl Ui {
 
         render_header(frame, header, app);
         self.render_list(frame, list, app);
-        render_detail(frame, detail, app);
+        render_detail(frame, detail, app, &mut self.detail);
         render_footer(frame, footer, app);
         if let Some(prompt) = &app.prompt
             && matches!(prompt.kind, PromptKind::CommandPalette)
@@ -88,7 +106,7 @@ fn render_header(frame: &mut Frame<'_>, area: Rect, app: &App) {
     frame.render_widget(header, area);
 }
 
-fn render_detail(frame: &mut Frame<'_>, area: Rect, app: &App) {
+fn render_detail(frame: &mut Frame<'_>, area: Rect, app: &App, cache: &mut DetailCache) {
     let title = if app.view == ViewMode::Files {
         let files = app.displayed_files();
         format!(
@@ -106,7 +124,7 @@ fn render_detail(frame: &mut Frame<'_>, area: Rect, app: &App) {
     } else {
         "Details".into()
     };
-    let detail = Paragraph::new(safe_text(&app.detail_text))
+    let detail = Paragraph::new(cache.rendered(&app.detail_text))
         .block(Block::default().borders(Borders::ALL).title(title))
         .scroll((app.detail_scroll, app.detail_column));
     frame.render_widget(detail, area);
@@ -205,7 +223,9 @@ fn shortcuts(view: ViewMode) -> &'static str {
         }
         ViewMode::Reflog => "+ older entries | N recover into new branch",
         ViewMode::Branches => "enter switch | b new | B rename | D delete | m merge | z rebase",
-        ViewMode::GitHubRepositories => "enter clone | G auth status | O open local repository",
+        ViewMode::GitHubRepositories => {
+            "enter clone | N create repository | G auth status | O open local repository"
+        }
         ViewMode::Workspaces => "enter open | N create | D remove | O open repository",
         ViewMode::PrFiles => "j/k file | C line comment | PgUp/PgDn patch | r refresh",
         ViewMode::PullRequests => {

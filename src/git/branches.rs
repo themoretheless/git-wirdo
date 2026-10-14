@@ -30,17 +30,13 @@ impl Repository {
             "refs/heads/",
         ])?;
         let text = std::str::from_utf8(&bytes).context("Git returned a non-UTF-8 branch name")?;
-        text.lines()
-            .map(|line| {
-                let (marker, name) = line
-                    .split_once('\0')
-                    .context("Invalid branch record from Git")?;
-                Ok(BranchEntry {
-                    name: name.to_owned(),
-                    current: marker == "*",
-                })
+        Ok(line_records::<2>(text, "branch")?
+            .into_iter()
+            .map(|[marker, name]| BranchEntry {
+                name,
+                current: marker == "*",
             })
-            .collect()
+            .collect())
     }
 
     pub fn rename_branch(&self, old: &str, new: &str) -> Result<()> {

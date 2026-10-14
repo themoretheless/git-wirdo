@@ -81,13 +81,19 @@ pub fn run(repository: Repository, state_path: Option<PathBuf>) -> Result<()> {
     let mut terminal = Terminal::new(CrosstermBackend::new(io::stdout()))?;
     let mut ui = Ui::default();
     let mut last_save = Instant::now() - Duration::from_secs(1);
+    // Redraw only after input, a finished or running background task, or a settings change;
+    // an idle client must not rebuild every list ten times a second.
+    let mut dirty = true;
     loop {
+        dirty |= session.busy();
         session.tick();
         if !session.busy()
             && (last_save.elapsed() >= Duration::from_secs(1) || !session.app.running())
         {
             if let Some(store) = &mut store {
+                let previous = session.app.persistence_error().map(str::to_owned);
                 session.app.save_navigation(store);
+                dirty |= previous.as_deref() != session.app.persistence_error();
             } else {
                 session.app.capture_navigation();
             }
@@ -96,13 +102,18 @@ pub fn run(repository: Repository, state_path: Option<PathBuf>) -> Result<()> {
         if !session.app.running() {
             break;
         }
-        terminal.draw(|frame| ui.draw(frame, &session.app))?;
+        if dirty {
+            terminal.draw(|frame| ui.draw(frame, &session.app))?;
+            dirty = false;
+        }
         if event::poll(Duration::from_millis(100))? {
             match event::read()? {
                 Event::Key(key) => session.handle_key(key),
                 Event::Paste(text) => session.handle_paste(&text),
-                _ => {}
+                Event::Resize(..) => {}
+                _ => continue,
             }
+            dirty = true;
         }
     }
     drop(terminal);
