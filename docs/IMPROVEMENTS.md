@@ -28,11 +28,33 @@ Existing mutation-specific stale-state checks remain necessary.
 - Transactional refresh deliberately retains a second app snapshot until success;
   this is a correctness cost, not a memory optimization.
 
-Paired measurements and resource results are pending the final release builds;
-they will be recorded before this draft is merged.
+Paired measurements and environment are recorded in
+[performance-2026-10-14.json](performance-2026-10-14.json), comparing `23ab607`
+with accepted code `09d168d` using immutable executable copies.
+
+| Fixture / probe | Before median / p95, ms | After median / p95, ms |
+| --- | --- | --- |
+| small / page_down_100 | 444.72 / 681.26 | 1.15 / 15.61 |
+| small / session_scroll_100 | 1030.85 / 1689.17 | 1.21 / 38.48 |
+| history / page_down_100 | 1196.92 / 1676.15 | 1.57 / 3.33 |
+| history / session_scroll_100 | 731.78 / 2025.02 | 2.42 / 6.90 |
+| files / page_down_100 | 625.57 / 1692.16 | 7.47 / 203.28 |
+| files / session_scroll_100 | 538.85 / 1014.45 | 1.50 / 52.03 |
+
+| Fixture | Before maximum RSS, MiB | After maximum RSS, MiB |
+| --- | --- | --- |
+| small | 27.44 | 30.38 |
+| history | 30.02 | 29.42 |
+| files | 16.17 | 16.91 |
+
+These show a large paging improvement, including at p95. Other latency measurements
+are noisy and sometimes worse; no overall startup/refresh/search improvement is
+claimed. Maximum RSS increased on the small fixture and varied on others; no
+memory saving is claimed. The retained complete snapshot is a correctness cost.
+
 Build the baseline and changed revision with separate Cargo target directories
 using `cargo build --locked --release --example performance`, preserve the old probe
-binary, then `python3 scripts/measure.py OUTPUT_DIRECTORY OLD_PROBE_BINARY`.
+binary, then `python3 scripts/measure.py OUTPUT_DIRECTORY OLD_PROBE_BINARY NEW_PROBE_BINARY`.
 The script rejects identical executable hashes and records host load. It creates
 disposable, identical repositories: 20 commits/10 files,
 3000 commits/10 files, and 20 commits/3000 files, plus one large tracked file in each case. Normal
@@ -47,6 +69,11 @@ changed lines (about 60,000 displayed diff lines). Session paging includes cloni
 timing includes a deliberate 25 ms delay before cancellation of a sleeping
 helper; it is total operation time, not pure cancel-to-exit latency. On macOS
 `/usr/bin/time -l` records resource usage separately for each probe process.
+The `open_diff` probe navigates successive entries, clamping at the last one;
+small fixtures therefore mix ordinary and large diff reloads.
+Paging probes time App/Session handlers, excluding terminal drawing. The render
+probe uses the initially selected ordinary file with warmed rendering caches;
+large-diff frame latency is not measured by that probe.
 No timing threshold is added to CI.
 
 Rejected experiments: adaptive initial process polling and allocation-free detail
@@ -56,8 +83,11 @@ Startup/refresh/diff latency is reported without claiming an improvement.
 
 ## Validation and remaining limits
 
-Formatting, strict all-target/all-feature Clippy, the complete tests, and hosted
-Linux/macOS/Windows CI are required for publication. Existing acceptance covers
+Formatting and strict all-target/all-feature Clippy passed. The full local suite
+passed 219 tests. [Hosted acceptance](https://github.com/themoretheless/git-wirdo/actions/runs/38598225585)
+for accepted code `09d168d` passed Linux 221, macOS 219 and Windows 189 tests.
+The public API adds a read-only `App::detail_column()` getter; CLI flags and the
+persisted settings format retain compatibility. Existing acceptance covers
 palette text versus shortcuts, multiline paste, narrow terminals, long lists,
 search wrap, conflict recovery, inherited pipes and graceful/forced cancellation.
 The import terminal driver now waits for the completed refresh message rather than

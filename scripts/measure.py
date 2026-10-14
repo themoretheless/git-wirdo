@@ -4,7 +4,7 @@ Then run this script with an output directory. Fixtures are disposable and seede
 """
 import json, pathlib, subprocess, sys, tempfile, platform, hashlib, os, time
 out = pathlib.Path(sys.argv[1]); out.mkdir(parents=True, exist_ok=True)
-binary = pathlib.Path(__file__).resolve().parents[1] / 'target/release/examples/performance'
+binary = pathlib.Path(sys.argv[3]).resolve() if len(sys.argv)>3 else pathlib.Path(__file__).resolve().parents[1] / 'target/release/examples/performance'
 runs=[]
 if len(sys.argv)>2 and hashlib.sha256(binary.read_bytes()).digest()==hashlib.sha256(pathlib.Path(sys.argv[2]).read_bytes()).digest():
     raise SystemExit('Before/after binaries are identical: rebuild each revision in separate target directories.')
