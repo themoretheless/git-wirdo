@@ -14,7 +14,7 @@ use std::time::Instant;
 
 struct Job {
     scroll_revision: u64,
-    worker: JoinHandle<App>,
+    worker: JoinHandle<(App, bool)>,
     control: Arc<Control>,
     closing: Arc<AtomicBool>,
     started: Instant,
@@ -24,6 +24,7 @@ pub struct Session {
     scroll_revision: u64,
     pub app: App,
     job: Option<Job>,
+    recovery_required: bool,
 }
 impl Session {
     pub fn new(app: App) -> Self {
@@ -31,6 +32,7 @@ impl Session {
             app,
             job: None,
             scroll_revision: 0,
+            recovery_required: false,
         }
     }
     pub fn busy(&self) -> bool {
@@ -53,7 +55,7 @@ impl Session {
         }
         let job = self.job.take().unwrap();
         match job.worker.join() {
-            Ok(mut updated) => {
+            Ok((mut updated, recovery_required)) => {
                 if updated.detail_text == self.app.detail_text
                     && job.scroll_revision != self.scroll_revision
                 {
@@ -63,9 +65,14 @@ impl Session {
                 if job.closing.load(Ordering::SeqCst) {
                     updated.running = false;
                 }
+                self.recovery_required =
+                    recovery_required || (self.recovery_required && updated.message_is_error);
                 self.app = updated;
             }
             Err(_) => {
+                self.recovery_required = true;
+                self.app.prompt = None;
+                self.app.searching = false;
                 self.app.message = "Background task panicked; refresh before another action".into();
                 self.app.message_is_error = true;
                 if job.closing.load(Ordering::SeqCst) {
@@ -102,6 +109,24 @@ impl Session {
             }
             return;
         }
+        if self.recovery_required
+            && !matches!(
+                action_for_key(key),
+                Some(
+                    Action::Refresh
+                        | Action::Quit
+                        | Action::PageDown
+                        | Action::PageUp
+                        | Action::ScrollLeft
+                        | Action::ScrollRight
+                )
+            )
+        {
+            self.app.message =
+                "Background task failed; press r to refresh before another action".into();
+            self.app.message_is_error = true;
+            return;
+        }
         if self.local_key(key) {
             self.app.handle_key(key);
             return;
@@ -133,6 +158,7 @@ impl Session {
             self.app.prompt = None;
         }
         let worker = thread::spawn(move || {
+            let mut recovery_required = false;
             controlled(task_control.clone(), generation, || updated.handle_key(key));
             if task_control.generation() != generation && !task_closing.load(Ordering::SeqCst) {
                 // A cancelled Git command may already have changed index/files/operation state.
@@ -140,10 +166,15 @@ impl Session {
                 let refreshed = controlled(task_control.clone(), task_control.generation(), || {
                     updated.refresh()
                 });
+                recovery_required = refreshed.is_err();
+                if recovery_required {
+                    updated.prompt = None;
+                    updated.searching = false;
+                }
                 updated.message = match refreshed { Ok(()) => "Operation cancelled; repository state reloaded. Inspect changes before retrying.".into(), Err(error) => format!("Operation cancelled; refresh failed: {error:#}") };
                 updated.message_is_error = true;
             }
-            updated
+            (updated, recovery_required)
         });
         self.job = Some(Job {
             scroll_revision: self.scroll_revision,
@@ -186,5 +217,66 @@ impl Drop for Session {
             job.control.cancel();
             let _ = job.worker.join();
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    #[test]
+    fn panic_requires_successful_refresh_before_another_mutation() {
+        let repo = crate::test_support::TestRepo::new();
+        std::fs::write(repo.open().root().join("file"), "pending\n").unwrap();
+        let mut session = Session::new(App::new(repo.open()).unwrap());
+        let worker = thread::spawn(|| panic!("injected worker failure"));
+        while !worker.is_finished() {
+            thread::yield_now();
+        }
+        session.job = Some(Job {
+            scroll_revision: 0,
+            worker,
+            control: Arc::new(Control::default()),
+            closing: Arc::new(AtomicBool::new(false)),
+            started: Instant::now(),
+            description: "injected failure".into(),
+        });
+        session.tick();
+        session.handle_key(KeyEvent::new(
+            KeyCode::Char('s'),
+            crossterm::event::KeyModifiers::NONE,
+        ));
+        assert!(
+            !session.busy(),
+            "mutation must be blocked after a worker panic"
+        );
+        assert!(
+            repo.open()
+                .load_state()
+                .unwrap()
+                .files
+                .iter()
+                .all(|f| !f.staged)
+        );
+        session.handle_key(KeyEvent::new(
+            KeyCode::Char('r'),
+            crossterm::event::KeyModifiers::NONE,
+        ));
+        let deadline = Instant::now() + std::time::Duration::from_secs(10);
+        while session.busy() {
+            assert!(Instant::now() < deadline);
+            session.tick();
+            thread::sleep(std::time::Duration::from_millis(5));
+        }
+        assert!(!session.app.message_is_error, "{}", session.app.message);
+        session.handle_key(KeyEvent::new(
+            KeyCode::Char('s'),
+            crossterm::event::KeyModifiers::NONE,
+        ));
+        while session.busy() {
+            assert!(Instant::now() < deadline);
+            session.tick();
+            thread::sleep(std::time::Duration::from_millis(5));
+        }
+        assert!(repo.open().load_state().unwrap().files[0].staged);
     }
 }

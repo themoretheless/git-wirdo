@@ -8,7 +8,7 @@ use crate::model::{ViewMode, display_path};
 /// Widest line of the detail pane, for horizontal scrolling bounds.
 fn widest_line(text: &str) -> u16 {
     text.lines()
-        .map(|line| line.chars().count())
+        .map(|line| ratatui::text::Line::from(crate::model::terminal_text(line)).width())
         .max()
         .unwrap_or(0)
         .min(u16::MAX as usize) as u16
@@ -148,11 +148,14 @@ impl App {
                     .min(widest_line(&self.detail_text));
             }
             Action::PageDown => {
-                let last = self.detail_text.lines().count().saturating_sub(1);
-                self.detail_scroll = self
-                    .detail_scroll
-                    .saturating_add(10)
-                    .min(last.min(u16::MAX as usize) as u16);
+                let target = self.detail_scroll.saturating_add(10);
+                let last = self
+                    .detail_text
+                    .lines()
+                    .take(usize::from(target) + 1)
+                    .count()
+                    .saturating_sub(1);
+                self.detail_scroll = target.min(last as u16);
             }
             Action::PageUp => self.detail_scroll = self.detail_scroll.saturating_sub(10),
             Action::Search => {

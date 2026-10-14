@@ -2,6 +2,7 @@
 mod actions;
 mod detail;
 mod prompt;
+mod selection;
 
 pub use prompt::{Prompt, PromptKind};
 
@@ -249,7 +250,20 @@ impl App {
     }
 
     pub fn refresh(&mut self) -> Result<()> {
-        // Keep the previous snapshot intact if reading the repository fails.
+        // Publish one complete snapshot; failure must not expose partially refreshed lists.
+        let mut updated = self.clone();
+        updated.refresh_snapshot()?;
+        *self = updated;
+        Ok(())
+    }
+
+    fn refresh_snapshot(&mut self) -> Result<()> {
+        let selected = self.selection_key(self.view, self.selection());
+        let file = self.selection_key(ViewMode::Files, self.file_selection);
+        let history = self.selection_key(ViewMode::History, self.history_selection);
+        let branch = self.selection_key(ViewMode::Branches, self.branch_selection);
+        let viewport = (self.detail_scroll, self.detail_column);
+        let previous_detail = self.detail_text.clone();
         self.state = self
             .repository
             .load_state_with_history(self.history_limit)?;
@@ -261,6 +275,9 @@ impl App {
         if self.browse_tracked {
             self.tracked_files = self.load_tracked_files()?;
         }
+        self.restore_selection(ViewMode::Files, file.as_ref());
+        self.restore_selection(ViewMode::History, history.as_ref());
+        self.restore_selection(ViewMode::Branches, branch.as_ref());
         let files = self.displayed_files().len();
         clamp(&mut self.file_selection, files);
         clamp(&mut self.branch_selection, self.state.branches.len());
@@ -269,7 +286,15 @@ impl App {
             self.state.merge_state.conflicts.len(),
         );
         self.load_view_data(false)?;
+        self.restore_selection(self.view, selected.as_ref());
+        self.clamp_selection();
         self.refresh_detail();
+        if selected.is_some()
+            && self.selection_key(self.view, self.selection()) == selected
+            && self.detail_text == previous_detail
+        {
+            (self.detail_scroll, self.detail_column) = viewport;
+        }
         Ok(())
     }
 
@@ -304,6 +329,7 @@ impl App {
 
     /// Load data only the current view needs. `refresh` already holds fresh history.
     fn load_view_data(&mut self, reload_history: bool) -> Result<()> {
+        let selected = self.selection_key(self.view, self.selection());
         match self.view {
             ViewMode::Reflog => self.reflog = self.repository.reflog(self.reflog_limit)?,
             ViewMode::History => {
@@ -353,6 +379,7 @@ impl App {
             ViewMode::Files | ViewMode::Branches | ViewMode::Conflicts => {}
             ViewMode::RecentRepositories => {}
         }
+        self.restore_selection(self.view, selected.as_ref());
         self.clamp_selection();
         Ok(())
     }
@@ -386,7 +413,11 @@ impl App {
     }
 
     fn selection_mut(&mut self) -> &mut usize {
-        match self.view {
+        self.selection_mut_for(self.view)
+    }
+
+    fn selection_mut_for(&mut self, view: ViewMode) -> &mut usize {
+        match view {
             ViewMode::RecentRepositories => &mut self.recent_selection,
             ViewMode::PrFiles => &mut self.pr_file_selection,
             ViewMode::Reflog => &mut self.reflog_selection,

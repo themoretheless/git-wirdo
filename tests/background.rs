@@ -328,3 +328,40 @@ fn pr_modal_shortcut_letters_and_multiline_paste_remain_immediate_text() {
     assert!(!session.busy() && session.app.running);
     assert_eq!(session.app.prompt.as_ref().unwrap().text, "LM\nqPcs");
 }
+
+#[cfg(unix)]
+#[test]
+fn cancelled_operation_with_failed_reload_blocks_mutations_until_recovery() {
+    let (repo, mut session) = slow_commit();
+    let index = repo.git(&["ls-files", "--stage"]);
+    let head = repo.git(&["rev-parse", "HEAD"]);
+    let git_dir = repo.path.join(".git");
+    let hidden = repo.path.join("hidden-git");
+    std::fs::rename(&git_dir, &hidden).unwrap();
+    session.handle_key(KeyEvent::new(KeyCode::Esc, KeyModifiers::NONE));
+    finish(&mut session);
+    assert!(
+        session.app.message.contains("refresh failed"),
+        "{}",
+        session.app.message
+    );
+    std::fs::rename(&hidden, &git_dir).unwrap();
+    session.handle_key(key('u'));
+    assert!(
+        !session.busy(),
+        "mutation must wait for successful recovery refresh"
+    );
+    assert_eq!(repo.git(&["ls-files", "--stage"]), index);
+    assert_eq!(repo.git(&["rev-parse", "HEAD"]), head);
+    assert_eq!(
+        std::fs::read_to_string(repo.path.join("file")).unwrap(),
+        "staged"
+    );
+    assert_descendant_stopped(&repo);
+    session.handle_key(key('r'));
+    finish(&mut session);
+    assert!(!session.app.message_is_error, "{}", session.app.message);
+    session.handle_key(key('u'));
+    finish(&mut session);
+    assert!(repo.git(&["diff", "--cached", "--name-only"]).is_empty());
+}

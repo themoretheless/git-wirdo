@@ -727,3 +727,32 @@ fn mail_import_conflicts_can_be_resolved_or_aborted_through_terminal_controls() 
         terminal.quit();
     }
 }
+
+#[test]
+fn external_file_insertion_keeps_terminal_selection_and_scroll_before_staging() {
+    let repo = TestRepo::new();
+    repo.write(
+        "b",
+        &(0..100)
+            .map(|i| format!("TARGET LINE {i}\n"))
+            .collect::<String>(),
+    );
+    repo.write("c", "other\n");
+    let mut terminal = tui(&repo);
+    terminal.expect("TARGET LINE 0");
+    terminal.key(b"\x1b[6~", "TARGET LINE 10");
+    repo.write("a", "external insertion\n");
+    let screen = terminal.key(b"r", "Action: Refreshed");
+    assert!(screen.contains("TARGET LINE 10"), "{screen}");
+    assert!(
+        !screen.contains("TARGET LINE 0"),
+        "viewport reset: {screen}"
+    );
+    terminal.key(b"s", "Action: Staged b");
+    assert_eq!(repo.git(&["diff", "--cached", "--name-only"]).trim(), "b");
+    assert_eq!(
+        std::fs::read_to_string(repo.path.join("a")).unwrap(),
+        "external insertion\n"
+    );
+    terminal.quit();
+}

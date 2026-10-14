@@ -115,6 +115,7 @@ pub fn output_with_input(command: &mut Command, input: Option<&[u8]>) -> Result<
         let input = input.to_vec();
         thread::spawn(move || stdin.write_all(&input))
     });
+    let mut poll_delay = Duration::from_millis(1);
     let waited = loop {
         if let Some(task) = &task
             && task.control.generation() != task.generation
@@ -136,7 +137,10 @@ pub fn output_with_input(command: &mut Command, input: Option<&[u8]>) -> Result<
         }
         match child.try_wait() {
             Ok(Some(status)) => break Ok(status),
-            Ok(None) => thread::sleep(Duration::from_millis(20)),
+            Ok(None) => {
+                thread::sleep(poll_delay);
+                poll_delay = (poll_delay * 2).min(Duration::from_millis(20));
+            }
             Err(error) => {
                 if let Some(tree) = &tree {
                     tree.terminate();
