@@ -800,7 +800,6 @@ mod tests {
     #[cfg(unix)]
     #[test]
     fn api_failure_preserves_server_reason_alongside_stderr_status() {
-        use std::os::unix::fs::PermissionsExt;
         let path = std::env::temp_dir().join(format!("wirdo-gh-error-{}", std::process::id()));
         std::fs::create_dir_all(&path).unwrap();
         let program = path.join("fake-gh");
@@ -808,8 +807,10 @@ mod tests {
             &program,
             "#!/bin/sh\necho '{\"errors\":[\"Can not approve your own pull request\"]}'\necho 'gh: Unprocessable Entity (HTTP 422)' >&2\nexit 1\n",
         ).unwrap();
-        std::fs::set_permissions(&program, std::fs::Permissions::from_mode(0o700)).unwrap();
-        let error = run_program(&path, program.as_os_str(), &["api"])
+        // Run the script through sh: executing a file this process just wrote races with
+        // concurrent test forks that still hold its write descriptor (ETXTBSY).
+        let script = program.to_str().unwrap();
+        let error = run_program(&path, std::ffi::OsStr::new("/bin/sh"), &[script, "api"])
             .unwrap_err()
             .to_string();
         assert!(error.contains("HTTP 422"), "{error}");
@@ -823,16 +824,18 @@ mod tests {
     #[cfg(unix)]
     #[test]
     fn command_transport_preserves_arguments_cwd_and_reports_failures() {
-        use std::os::unix::fs::PermissionsExt;
         let path = std::env::temp_dir().join(format!("wirdo-gh-{}", std::process::id()));
         std::fs::create_dir_all(&path).unwrap();
         let program = path.join("fake-gh");
         std::fs::write(&program, "#!/bin/sh\n[ \"$GH_PROMPT_DISABLED\" = 1 ] || exit 9\n[ \"$1\" = fail ] && { echo 'auth failed' >&2; exit 1; }\nprintf '%s\\n' \"$PWD\" \"$@\"\n").unwrap();
-        std::fs::set_permissions(&program, std::fs::Permissions::from_mode(0o700)).unwrap();
+        // Through sh, as above, so a concurrent fork cannot make the spawn fail with ETXTBSY.
+        let script = program.to_str().unwrap();
+        let sh = std::ffi::OsStr::new("/bin/sh");
         let output = run_program(
             &path,
-            program.as_os_str(),
+            sh,
             &[
+                script,
                 "pr",
                 "comment",
                 "--body",
@@ -843,7 +846,7 @@ mod tests {
         assert!(output.contains("literal $(echo secret); two words"));
         assert!(output.contains(path.to_str().unwrap()));
         assert!(
-            run_program(&path, program.as_os_str(), &["fail"])
+            run_program(&path, sh, &[script, "fail"])
                 .unwrap_err()
                 .to_string()
                 .contains("auth failed")
