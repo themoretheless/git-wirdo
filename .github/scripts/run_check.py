@@ -6,6 +6,8 @@ import sys
 
 
 def main():
+    # Windows redirected stdout can default to cp1252; terminal failures contain Unicode.
+    sys.stdout.reconfigure(encoding="utf-8", errors="replace")
     if len(sys.argv) < 2:
         print("Usage: run_check.py COMMAND [ARG ...]", file=sys.stderr)
         return 2
