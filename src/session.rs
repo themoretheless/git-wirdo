@@ -90,6 +90,8 @@ impl Session {
         if self.busy()
             || self.recovery_required
             || self.app.prompt.is_some()
+            || self.app.line_editor.is_some()
+            || self.app.rebase_editor.is_some()
             || self.app.searching
             || !self.app.changed_externally()
         {

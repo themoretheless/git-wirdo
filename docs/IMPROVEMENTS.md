@@ -148,3 +148,8 @@ changes. Cancellation or cleanup failure after store retains a recoverable stash
 Worker-panic/failed-reload recovery closes editors so they cannot intercept refresh.
 Earlier F1/F3 limitations above describe the previous accepted package; this
 follow-up replaces its single filter and raw-only todo interface.
+
+The concurrent auto-reload change from PR #6 is included. Polling explicitly waits
+while either visual editor is open, then resumes after close; captured selections
+still use exact-diff/HEAD checks at mutation. The integration regression checks
+both editors, retained drafts and the subsequent external-file reload.

@@ -412,3 +412,58 @@ fn external_reload_never_interrupts_typing() {
     finish(&mut session);
     assert!(session.refresh_if_changed());
 }
+
+#[test]
+fn external_reload_waits_for_visual_editors_to_close() {
+    use git_wirdo::{app::Action, model::ViewMode};
+    let repo = TestRepo::new();
+    repo.write("file", "base\n");
+    repo.commit_all("base");
+    repo.write("file", "edited\n");
+    let mut app = App::new(repo.open()).unwrap();
+    app.handle(Action::OpenHunks);
+    app.handle(Action::EditLines);
+    let mut session = Session::new(app);
+    repo.write("external", "new file\n");
+    assert!(session.app.changed_externally());
+    assert!(!session.refresh_if_changed());
+    assert!(session.app.line_editor_open());
+    assert!(!session.busy());
+    session.handle_key(KeyEvent::new(KeyCode::Esc, KeyModifiers::NONE));
+    assert!(session.refresh_if_changed());
+    finish(&mut session);
+    assert!(
+        session
+            .app
+            .state()
+            .files
+            .iter()
+            .any(|f| f.path.to_str() == Some("external"))
+    );
+
+    repo.commit_all("second");
+    repo.write("another", "third\n");
+    repo.commit_all("third");
+    let mut app = App::new(repo.open()).unwrap();
+    app.set_view(ViewMode::History);
+    app.select(2);
+    app.handle(Action::InteractiveRebase);
+    let mut session = Session::new(app);
+    repo.write("external-again", "pending\n");
+    let todo = session.app.rebase_todo().unwrap();
+    assert!(session.app.changed_externally());
+    assert!(!session.refresh_if_changed());
+    assert_eq!(session.app.rebase_todo().unwrap(), todo);
+    assert!(!session.busy());
+    session.handle_key(KeyEvent::new(KeyCode::Esc, KeyModifiers::NONE));
+    assert!(session.refresh_if_changed());
+    finish(&mut session);
+    assert!(
+        session
+            .app
+            .state()
+            .files
+            .iter()
+            .any(|f| f.path.to_str() == Some("external-again"))
+    );
+}
