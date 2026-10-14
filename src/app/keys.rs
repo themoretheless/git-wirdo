@@ -158,19 +158,10 @@ impl App {
         } else {
             0
         };
-        let mut first = None;
-        let found = self
-            .detail_text
-            .lines()
-            .enumerate()
-            .find_map(|(index, line)| {
-                if !line.contains(&self.search) {
-                    return None;
-                }
-                first.get_or_insert(index);
-                (index >= start).then_some(index)
-            })
-            .or(first);
+        let lines: Vec<_> = self.detail_text.lines().collect();
+        let found = (start..lines.len())
+            .chain(0..start.min(lines.len()))
+            .find(|index| lines[*index].contains(&self.search));
         self.detail_column = 0;
         if let Some(line) = found {
             self.detail_scroll = line.min(u16::MAX as usize) as u16;

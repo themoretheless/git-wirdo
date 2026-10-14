@@ -11,7 +11,8 @@ pub(super) enum SelectionKey {
 }
 impl App {
     pub(crate) fn same_selected_object(&self, other: &Self) -> bool {
-        self.view == other.view
+        self.repository.root() == other.repository.root()
+            && self.view == other.view
             && self
                 .selection_key(self.view, self.selection())
                 .is_some_and(|key| {

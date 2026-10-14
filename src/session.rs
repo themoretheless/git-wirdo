@@ -311,4 +311,36 @@ mod tests {
             "scroll belongs to a different file"
         );
     }
+    #[test]
+    fn busy_scroll_does_not_cross_repository_roots_with_the_same_relative_path() {
+        let repo = crate::test_support::TestRepo::new();
+        let other = crate::test_support::TestRepo::new();
+        let content = "same text\n".repeat(60);
+        for r in [&repo, &other] {
+            std::fs::write(r.open().root().join("a"), &content).unwrap();
+        }
+        let mut session = Session::new(App::new(repo.open()).unwrap());
+        let updated = App::new(other.open()).unwrap();
+        assert_eq!(updated.detail_text, session.app.detail_text);
+        session.app.handle(crate::app::Action::PageDown);
+        session.scroll_revision = 1;
+        let worker = thread::spawn(move || (updated, false));
+        while !worker.is_finished() {
+            thread::yield_now();
+        }
+        session.job = Some(Job {
+            scroll_revision: 0,
+            worker,
+            control: Arc::new(Control::default()),
+            closing: Arc::new(AtomicBool::new(false)),
+            started: Instant::now(),
+            description: "open repository".into(),
+        });
+        session.tick();
+        assert_eq!(session.app.repository.root(), other.open().root());
+        assert_eq!(
+            session.app.detail_scroll, 0,
+            "scroll belongs to another repository"
+        );
+    }
 }

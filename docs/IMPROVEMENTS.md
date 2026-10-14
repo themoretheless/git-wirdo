@@ -14,7 +14,7 @@ possible defects have been found. No numeric change quota is used.
 | R4 | A worker panics; despite the recovery message a subsequent staging operation starts. | Block commands until successful refresh, retaining quit and viewport controls. Close obsolete prompts. | Injected worker panic; index remains unstaged until recovery succeeds. |
 | R5 | Cancel a slow commit after its Git directory becomes temporarily unavailable; reload fails, then unstage is still accepted. | Failed cancellation recovery also blocks commands until successful refresh. | `background`: unchanged HEAD, index and working file, stopped hook descendant, explicit refresh then successful unstage. |
 | R6 | Horizontal scrolling uses code-point count for wide CJK and combining marks. | Bound scrolling by rendered terminal cells using the same control escaping as rendering. | `horizontal_bounds_use_terminal_cells_for_wide_and_combining_characters`. |
-| R7 | Two files have identical untracked previews; scrolling during background navigation is applied to the other file. | Transfer busy viewport changes only when selected object identity also matches. | Deterministic worker-completion regression in `session`. |
+| R7 | Two files have identical untracked previews; scrolling during background navigation is applied to the other file. | Transfer busy viewport changes only when repository root and selected object identity also match. | Deterministic worker-completion regressions for identical previews and different repositories in `session`. |
 
 Selection identities retain native path bytes; Linux verifies a non-UTF8 path.
 Stash/reflog selection uses commit identity; identical repeated reflog entries
@@ -24,10 +24,7 @@ Existing mutation-specific stale-state checks remain necessary.
 
 ## Measured changes
 
-- The process runner initially polls after 1, 2, 4, 8 and 16 ms, then caps at the
-  existing 20 ms interval. Long commands retain bounded polling and tree cleanup.
 - Paging stops counting lines once the requested viewport is reached.
-- Detail search scans lines without allocating a vector of every line.
 - Transactional refresh deliberately retains a second app snapshot until success;
   this is a correctness cost, not a memory optimization.
 
@@ -51,6 +48,11 @@ timing includes a deliberate 25 ms delay before cancellation of a sleeping
 helper; it is total operation time, not pure cancel-to-exit latency. On macOS
 `/usr/bin/time -l` records resource usage separately for each probe process.
 No timing threshold is added to CI.
+
+Rejected experiments: adaptive initial process polling and allocation-free detail
+search did not show consistent latency improvements on the loaded host. They were
+reverted; existing polling, cancellation and search algorithms are retained.
+Startup/refresh/diff latency is reported without claiming an improvement.
 
 ## Validation and remaining limits
 
