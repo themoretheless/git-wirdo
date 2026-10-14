@@ -1,3 +1,5 @@
+mod interactive;
+pub use interactive::InteractiveRebase;
 use std::ffi::{OsStr, OsString};
 use std::fs;
 use std::io::Read;

@@ -590,3 +590,26 @@ another command; quitting and viewport scrolling remain available. Horizontal
 scrolling counts terminal cells for wide and combining Unicode characters.
 See [the improvement register](docs/IMPROVEMENTS.md) for reproductions, measured
 performance, acceptance evidence and candidates for the next feature stage.
+
+### Name filters, line staging and interactive rebase
+
+- `\` in Files or Branches opens a case-insensitive name filter. Blank input
+  clears it; the Selection title shows the active filter. `j/k` move through
+  matching entries. `/` still searches commits or detail text. Filtering another
+  list replaces the previous filter; filters are local to the open repository.
+- `i` opens a file's text hunks. `=` accepts space-separated changed-line numbers
+  shown beside `+` and `-` lines. Select both sides to stage a replacement, or
+  either side independently. In staged mode (`d`) the same action unstages lines.
+  Working files stay unchanged; a changed diff requires refresh and reselection.
+  Binary, rename, mode, new-file and deleted-file changes use whole-file/hunk
+  operations instead.
+- In History select the **base commit to keep**, then `~`. Edit the subsequent
+  oldest-first todo using `pick`, `squash`, or `fixup` and full commit IDs. Separate entries with a newline or `;`. Reorder
+  entries freely; include every prepared commit exactly once. Alt-Enter inserts a
+  newline, Ctrl-U clears, Esc cancels. Unix supports bracketed multiline paste;
+  on native Windows use `;` between pasted entries.
+  Confirm with `rebase`. This editor accepts 1–200 commits in clean, linear,
+  attached-branch history. Rewriting published commits still requires coordinated
+  downstream handling; this action does not push. Original HEAD is retained in
+  recovery refs visible through Reflog. On conflicts use the existing Conflicts
+  view: resolve and `e` continue, `K` skip, or `x` abort.

@@ -6,6 +6,13 @@ use crate::model::{ViewMode, display_path};
 
 impl App {
     pub(super) fn selected_detail(&self) -> Result<String> {
+        if self.filter_view == Some(self.view)
+            && !self.list_filter.is_empty()
+            && matches!(self.view, ViewMode::Files | ViewMode::Branches)
+            && !self.visible_indices().contains(&self.selection())
+        {
+            return Ok("No matching selection; backslash edits or clears the name filter".into());
+        }
         match self.view {
             ViewMode::RecentRepositories => match self.navigation.repositories.get(self.recent_selection) {
                 Some(settings) => Ok(format!("{}\nSaved view: {:?}\nEnter opens this working tree; O opens another path.\nD forgets this entry without deleting any files.", display_path(&settings.root.path()?), settings.view)),
@@ -19,7 +26,7 @@ impl App {
                 Some(entry) => self.repository.commit_detail(&entry.sha),
                 None => Ok("No reflog entry selected".into()),
             },
-            ViewMode::Hunks => Ok(self.hunks.selected().map(|hunk| format!("{} hunk {}/{}\n{}\n\n{}", if hunk.staged { "Staged" } else { "Unstaged" }, self.hunks.selection + 1, self.hunks.items.len(), display_path(&hunk.file.path), String::from_utf8_lossy(&hunk.patch))).unwrap_or_else(|| "No text hunks. d switches staged/unstaged. Use full-file staging for untracked, binary, rename or mode changes.".into())),
+            ViewMode::Hunks => Ok(self.hunks.selected().map(|hunk| format!("{} hunk {}/{}\n{}\n\n{}", if hunk.staged { "Staged" } else { "Unstaged" }, self.hunks.selection + 1, self.hunks.items.len(), display_path(&hunk.file.path), hunk.numbered_changes())).unwrap_or_else(|| "No text hunks. d switches staged/unstaged. Use full-file staging for untracked, binary, rename or mode changes.".into())),
             ViewMode::Tags => match self.tags.selected() {
                 Some(tag) => Ok(format!("{} ({})\n{}\n\n{}", tag.name, tag.kind, tag.sha, self.repository.tag_detail(tag)?)),
                 None => Ok("No tags; N creates one.".into()),

@@ -72,10 +72,23 @@ impl Ui {
     fn render_list(&mut self, frame: &mut Frame<'_>, area: Rect, app: &App) {
         let (items, has_selection) = list_items(app);
         let list = List::new(items)
-            .block(Block::default().borders(Borders::ALL).title("Selection"))
+            .block(Block::default().borders(Borders::ALL).title(
+                if app.filter_view == Some(app.view) && !app.list_filter.is_empty() {
+                    format!("Selection | filter: {}", safe_text(&app.list_filter))
+                } else {
+                    "Selection".into()
+                },
+            ))
             .highlight_symbol("> ");
         let state = &mut self.lists[app.view.index()];
-        state.select(has_selection.then_some(app.selection()));
+        let selection = if app.filter_view == Some(app.view) && !app.list_filter.is_empty() {
+            app.visible_indices()
+                .iter()
+                .position(|i| *i == app.selection())
+        } else {
+            has_selection.then_some(app.selection())
+        };
+        state.select(selection);
         frame.render_stateful_widget(list, area, state);
     }
 }
@@ -208,7 +221,7 @@ fn shortcuts(view: ViewMode) -> &'static str {
             "enter open | N initialize | C clone Git | D forget entry | O open path"
         }
         ViewMode::Hunks => {
-            "s stage unstaged hunk | u unstage staged hunk | d staged/unstaged | tab files"
+            "= select lines | s stage hunk | u unstage hunk | d staged/unstaged | tab files"
         }
         ViewMode::Tags => "N create | D delete local | W publish | X delete remote | r refresh",
         ViewMode::Remotes => {
@@ -217,13 +230,15 @@ fn shortcuts(view: ViewMode) -> &'static str {
         ViewMode::RemoteBranches => "enter track | f fetch | U upstream | W publish",
         ViewMode::Stashes => "S save | y apply | T pop | D drop | r refresh",
         ViewMode::Files => {
-            "J tracked/changes | h history | Q blame | s stage | u unstage | i hunks | w restore index | D discard HEAD | c commit | b branch | f fetch | p pull | P push"
+            "\\ filter | J tracked/changes | h history | Q blame | s stage | u unstage | i hunks | w restore index | D discard HEAD | c commit | b branch | f fetch | p pull | P push"
         }
         ViewMode::History => {
-            "! export patch | g graph/patch | + older | Y cherry-pick | Z revert | F reset"
+            "~ interactive rebase | ! export patch | g graph/patch | + older | Y cherry-pick | Z revert | F reset"
         }
         ViewMode::Reflog => "+ older entries | N recover into new branch",
-        ViewMode::Branches => "enter switch | b new | B rename | D delete | m merge | z rebase",
+        ViewMode::Branches => {
+            "\\ filter | enter switch | b new | B rename | D delete | m merge | z rebase"
+        }
         ViewMode::GitHubRepositories => {
             "enter clone | N create repository | G auth status | O open local repository"
         }
@@ -393,6 +408,14 @@ fn list_items(app: &App) -> (Vec<ListItem<'static>>, bool) {
                 .collect(),
             "No conflicted files",
         ),
+    };
+    let lines = if app.filter_view == Some(app.view) && !app.list_filter.is_empty() {
+        app.visible_indices()
+            .into_iter()
+            .filter_map(|i| lines.get(i).cloned())
+            .collect()
+    } else {
+        lines
     };
     if lines.is_empty() {
         (vec![ListItem::new(empty)], false)

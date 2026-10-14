@@ -17,6 +17,9 @@ pub fn action_for_key(key: KeyEvent) -> Option<Action> {
         return None;
     }
     Some(match key.code {
+        KeyCode::Char('\\') => Action::FilterList,
+        KeyCode::Char('=') => Action::StageLines,
+        KeyCode::Char('~') => Action::InteractiveRebase,
         KeyCode::Char(':') => Action::CommandPalette,
         KeyCode::Char('@') => Action::ImportPatch,
         KeyCode::Char('J') => Action::BrowseTracked,

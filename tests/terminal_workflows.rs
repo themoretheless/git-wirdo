@@ -757,3 +757,55 @@ fn external_file_insertion_keeps_terminal_selection_and_scroll_before_staging() 
     );
     terminal.quit();
 }
+
+#[test]
+fn name_filters_and_individual_lines_through_terminal() {
+    let repo = TestRepo::new();
+    repo.write("aaa", "base\n");
+    repo.write("zzz", "one\ntwo\nthree\n");
+    repo.commit_all("base");
+    repo.write("aaa", "changed\n");
+    repo.write("zzz", "ONE\ntwo\nTHREE\n");
+    let mut terminal = tui(&repo);
+    terminal.key(b"\\", "Name filter");
+    terminal.field("zzz", "Filter: zzz (1 matches)");
+    terminal.key(b"i", "Unstaged hunk");
+    terminal.key(b"=", "Changed-line numbers");
+    terminal.field("1 2", "Updated selected lines in index");
+    assert_eq!(repo.git(&["show", ":zzz"]), "ONE\ntwo\nthree\n");
+    assert!(
+        !repo
+            .git(&["diff", "--cached", "--name-only"])
+            .contains("aaa")
+    );
+    terminal.view("Branches");
+    terminal.key(b"\\", "Name filter");
+    terminal.field("main", "Filter: main (1 matches)");
+    terminal.quit();
+}
+
+#[test]
+fn interactive_rebase_editor_through_terminal() {
+    let repo = TestRepo::new();
+    repo.write("base", "base");
+    repo.commit_all("base");
+    let base = repo.git(&["rev-parse", "HEAD"]).trim().to_owned();
+    repo.write("a", "a");
+    repo.commit_all("a");
+    repo.write("b", "b");
+    repo.commit_all("b");
+    let plan = repo.open().prepare_interactive_rebase(&base).unwrap();
+    let todo = plan.todo.clone();
+    let rows: Vec<_> = todo.lines().collect();
+    let todo = format!("{}\n{}", rows[0], rows[1].replacen("pick", "fixup", 1));
+    let mut terminal = tui(&repo);
+    terminal.view("History");
+    terminal.key(b"j", "a");
+    terminal.key(b"j", "base");
+    terminal.key(b"~", "Rebase todo:");
+    terminal.send(b"\x15");
+    terminal.field(&todo, "Type rebase");
+    terminal.field("rebase", "Interactive rebase completed");
+    assert_eq!(repo.git(&["rev-list", "--count", "HEAD"]).trim(), "2");
+    terminal.quit();
+}

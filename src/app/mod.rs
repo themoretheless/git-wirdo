@@ -71,6 +71,8 @@ pub struct App {
     pub(crate) tags: Listed<crate::model::TagEntry>,
     pub(crate) hunks: Listed<crate::patch::Hunk>,
     pub(crate) staged_hunks: bool,
+    pub(crate) list_filter: String,
+    pub(crate) filter_view: Option<ViewMode>,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
@@ -143,6 +145,8 @@ impl App {
             tags: Listed::default(),
             hunks: Listed::default(),
             staged_hunks: false,
+            list_filter: String::new(),
+            filter_view: None,
         };
         app.tracking = app.load_tracking();
         app.refresh_detail();
@@ -218,6 +222,13 @@ impl App {
         self.restore_selection(self.view, selected.as_ref());
         let (selection, len) = self.cursor();
         clamp_to(selection, len);
+        if self.filter_view == Some(self.view)
+            && !self.list_filter.is_empty()
+            && !self.visible_indices().contains(&self.selection())
+            && let Some(index) = self.visible_indices().first().copied()
+        {
+            self.select(index);
+        }
         self.refresh_detail();
         if selected.is_some()
             && self.selection_key(self.view, self.selection()) == selected
@@ -318,6 +329,21 @@ impl App {
     }
 
     pub(super) fn move_selection(&mut self, delta: isize) {
+        if self.filter_view == Some(self.view) && !self.list_filter.is_empty() {
+            let visible = self.visible_indices();
+            let current = visible
+                .iter()
+                .position(|i| *i == self.selection())
+                .unwrap_or(0);
+            if let Some(index) = visible.get(
+                current
+                    .saturating_add_signed(delta)
+                    .min(visible.len().saturating_sub(1)),
+            ) {
+                self.select(*index);
+            }
+            return;
+        }
         let (selection, len) = self.cursor();
         *selection = selection.saturating_add_signed(delta);
         clamp_to(selection, len);
@@ -392,6 +418,37 @@ impl App {
             &self.review_files
         } else {
             &self.state.files
+        }
+    }
+
+    pub fn visible_indices(&self) -> Vec<usize> {
+        if self.filter_view != Some(self.view) || self.list_filter.is_empty() {
+            return match self.view {
+                ViewMode::Files => (0..self.displayed_files().len()).collect(),
+                ViewMode::Branches => (0..self.state.branches.len()).collect(),
+                _ => Vec::new(),
+            };
+        }
+        let matches = |name: &str| {
+            self.filter_view != Some(self.view) || name.to_lowercase().contains(&self.list_filter)
+        };
+        match self.view {
+            ViewMode::Files => self
+                .displayed_files()
+                .iter()
+                .enumerate()
+                .filter(|(_, f)| matches(&f.label()))
+                .map(|(i, _)| i)
+                .collect(),
+            ViewMode::Branches => self
+                .state
+                .branches
+                .iter()
+                .enumerate()
+                .filter(|(_, b)| matches(&b.name))
+                .map(|(i, _)| i)
+                .collect(),
+            _ => Vec::new(),
         }
     }
 

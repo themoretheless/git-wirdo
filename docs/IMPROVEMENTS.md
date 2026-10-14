@@ -96,9 +96,9 @@ a header already present before the input; Unix step deadlines match the Windows
 The new terminal regression covers external insertion, unchanged scrolling and
 independent Git index verification. Remote GitHub mutations were not repeated.
 
-## Candidate next feature stage (requires separate selection)
+## Selected feature stage — implemented
 
-These are absent from the inspected implementation and are not implemented here:
+The user selected all three candidates. The follow-up implements:
 
 1. Filter local file and branch lists by name; retain existing detail/history search.
 2. Stage or unstage selected lines within a text hunk, with exact-diff guards.
@@ -106,3 +106,25 @@ These are absent from the inspected implementation and are not implemented here:
 
 No cloud agents, second-account GitHub operations, stash clearing or recursive
 submodule reset are included in this iteration.
+
+
+| ID | Previous limitation | Change | Regression evidence |
+| --- | --- | --- | --- |
+| F1 | Files/branches only had detail search. | Backslash opens a name filter, visible rows retain original identities; hidden selections cannot be mutated. | `editing`, Unix PTY and Windows ConPTY check index against the selected filename. |
+| F2 | Only complete text hunks could be staged. | `=` selects numbered changed lines; rebuild counts and context, preserve byte content/no-newline markers; exact original diff is rechecked. | `editing` tests replacements, insertions, deletions, independent unstaging, missing newline and stale snapshots; PTY/ConPTY independently inspect index. |
+| F3 | Rebase could only integrate a branch. | `~` edits a bounded linear todo after selected base, supports reorder/squash/fixup, validates immutable IDs and HEAD/branch, retains recovery ref. | `editing` covers fixup/reorder, invalid todos, dirty/detached refusal, conflict abort/continue; PTY/ConPTY drive the actual editor. |
+
+Limits: one active name filter, replaced when filtering another list; filters are
+not persisted. Line selection excludes structural file creation/deletion,
+rename/mode/binary patches. The rebase editor handles 1–200 commits after a
+base (the root commit itself is not rewritten), requires an attached clean branch, and excludes merge commits,
+drop/edit/exec. It runs the existing cancellable Git process and preserves Git's
+in-progress state on conflicts. Squash uses Git's combined messages without
+opening an external editor. No new performance improvement is claimed here.
+
+Windows follow-up: the CI wrapper now emits UTF-8 even when redirected Python
+stdout defaults to cp1252, preserving Unicode terminal failure diagnostics and
+the command's exit code. The todo editor also accepts `;` separators for native
+Windows input, whose crossterm backend does not emit Unix bracketed-paste events.
+The ConPTY scenario uses this native input path; Unix PTY still checks multiline
+bracketed paste.
