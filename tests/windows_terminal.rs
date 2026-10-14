@@ -418,3 +418,32 @@ fn native_windows_mail_conflict_recovery_continues_and_aborts_the_correct_operat
         terminal.quit();
     }
 }
+
+#[test]
+fn native_windows_refresh_keeps_file_identity_and_viewport_before_staging() {
+    let repo = TestRepo::new();
+    repo.write(
+        "b",
+        &(0..100)
+            .map(|i| format!("TARGET LINE {i}\n"))
+            .collect::<String>(),
+    );
+    repo.write("c", "other\n");
+    let mut terminal = Terminal::new(&repo);
+    terminal.expect("TARGET LINE 0");
+    terminal.key(b"\x1b[6~", "TARGET LINE 10");
+    repo.write("a", "external insertion\n");
+    let screen = terminal.key(b"r", "Action: Refreshed");
+    assert!(screen.contains("TARGET LINE 10"), "{screen}");
+    assert!(
+        !screen.contains("TARGET LINE 0"),
+        "viewport reset: {screen}"
+    );
+    terminal.key(b"s", "Action: Staged b");
+    assert_eq!(repo.git(&["diff", "--cached", "--name-only"]).trim(), "b");
+    assert_eq!(
+        std::fs::read_to_string(repo.path.join("a")).unwrap(),
+        "external insertion\n"
+    );
+    terminal.quit();
+}

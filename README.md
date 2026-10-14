@@ -580,3 +580,13 @@ because Unix PTY and filesystem fixtures are platform-specific; Windows uses
 ConPTY instead. The browser/export version also passed its full 191-test suite and build
 on Rust 1.101.0-nightly (282215592 2026-10-04). Nightly formatting, strict Clippy,
 and the new palette/mail repository and terminal scenarios also passed.
+
+### Reliability and responsiveness audit
+
+Refresh keeps the selected object and unchanged detail viewport when list rows
+move. Failed refreshes retain the previous complete app snapshot. After a worker
+panic or failed cancellation reload, press `r` to refresh successfully before
+another command; quitting and viewport scrolling remain available. Horizontal
+scrolling counts terminal cells for wide and combining Unicode characters.
+See [the improvement register](docs/IMPROVEMENTS.md) for reproductions, measured
+performance, acceptance evidence and candidates for the next feature stage.

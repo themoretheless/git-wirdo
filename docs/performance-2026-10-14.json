@@ -1,0 +1,436 @@
+{
+  "date": "2026-10-14",
+  "baseline_commit": "23ab6072376c6401030a20972489d201e54b3c35",
+  "after_code_commit": "09d168d40c8dc3498effcfcb52a18ce7ff915c6c",
+  "samples": 15,
+  "warmups": 1,
+  "profile": {
+    "name": "release",
+    "lto": "fat",
+    "codegen_units": 1,
+    "strip": "debuginfo"
+  },
+  "environment": {
+    "runs": [
+      {
+        "case": "small",
+        "variant": "before",
+        "binary_sha256": "16fa53e19100ca54d2bd94e93ed57869cf07b199705aa4188ea287e2222ba34e",
+        "elapsed_seconds": 64.186901667,
+        "load_before": [
+          177.3349609375,
+          157.015625,
+          149.69873046875
+        ],
+        "load_after": [
+          142.52197265625,
+          151.283203125,
+          148.1171875
+        ]
+      },
+      {
+        "case": "small",
+        "variant": "after",
+        "binary_sha256": "9c6a8f96c1527811fa385f44d7af132e417b321bc00b20f25cbc0e15dd2826e0",
+        "elapsed_seconds": 58.378256332999996,
+        "load_before": [
+          142.52197265625,
+          151.283203125,
+          148.1171875
+        ],
+        "load_after": [
+          125.2294921875,
+          144.9052734375,
+          145.9560546875
+        ]
+      },
+      {
+        "case": "history",
+        "variant": "after",
+        "binary_sha256": "9c6a8f96c1527811fa385f44d7af132e417b321bc00b20f25cbc0e15dd2826e0",
+        "elapsed_seconds": 42.8771605,
+        "load_before": [
+          125.2294921875,
+          144.9052734375,
+          145.9560546875
+        ],
+        "load_after": [
+          94.04443359375,
+          134.27978515625,
+          142.01123046875
+        ]
+      },
+      {
+        "case": "history",
+        "variant": "before",
+        "binary_sha256": "16fa53e19100ca54d2bd94e93ed57869cf07b199705aa4188ea287e2222ba34e",
+        "elapsed_seconds": 87.71614945799999,
+        "load_before": [
+          94.04443359375,
+          134.27978515625,
+          142.01123046875
+        ],
+        "load_after": [
+          67.86572265625,
+          116.05126953125,
+          134.2880859375
+        ]
+      },
+      {
+        "case": "files",
+        "variant": "before",
+        "binary_sha256": "16fa53e19100ca54d2bd94e93ed57869cf07b199705aa4188ea287e2222ba34e",
+        "elapsed_seconds": 82.76176908400004,
+        "load_before": [
+          69.01025390625,
+          114.68798828125,
+          133.58984375
+        ],
+        "load_after": [
+          77.52978515625,
+          106.04296875,
+          128.45556640625
+        ]
+      },
+      {
+        "case": "files",
+        "variant": "after",
+        "binary_sha256": "9c6a8f96c1527811fa385f44d7af132e417b321bc00b20f25cbc0e15dd2826e0",
+        "elapsed_seconds": 72.01241083299999,
+        "load_before": [
+          77.52978515625,
+          106.04296875,
+          128.45556640625
+        ],
+        "load_after": [
+          83.65625,
+          101.4482421875,
+          124.9111328125
+        ]
+      }
+    ],
+    "platform": "macOS-26.7.2-arm64-arm-64bit",
+    "rustc": "rustc 1.101.0-nightly (e9bbadf68 2026-10-12)"
+  },
+  "cases": {
+    "small": {
+      "before": {
+        "metrics": [
+          {
+            "median_ms": 718.939084,
+            "p95_ms": 1350.85475,
+            "probe": "startup"
+          },
+          {
+            "median_ms": 476.04395900000003,
+            "p95_ms": 1226.028292,
+            "probe": "refresh"
+          },
+          {
+            "median_ms": 602.1331250000001,
+            "p95_ms": 1267.07,
+            "probe": "background_refresh"
+          },
+          {
+            "median_ms": 0.167667,
+            "p95_ms": 0.323333,
+            "probe": "render"
+          },
+          {
+            "median_ms": 223.426708,
+            "p95_ms": 819.6051659999999,
+            "probe": "open_diff"
+          },
+          {
+            "median_ms": 444.721959,
+            "p95_ms": 681.2587500000001,
+            "probe": "page_down_100"
+          },
+          {
+            "median_ms": 11.120417,
+            "p95_ms": 34.515625,
+            "probe": "search"
+          },
+          {
+            "median_ms": 1030.848917,
+            "p95_ms": 1689.173541,
+            "probe": "session_scroll_100"
+          },
+          {
+            "median_ms": 69.883,
+            "p95_ms": 103.325875,
+            "probe": "cancel"
+          }
+        ],
+        "maximum_resident_set_size_bytes": 28770304,
+        "resources": "       64.17 real         8.38 user         4.99 sys\n            28770304  maximum resident set size\n                   0  average shared memory size\n                   0  average unshared data size\n                   0  average unshared stack size\n              442500  page reclaims\n                3674  page faults\n                   0  swaps\n                   0  block input operations\n                   0  block output operations\n                   0  messages sent\n                   0  messages received\n                   0  signals received\n                 711  voluntary context switches\n               74461  involuntary context switches\n         45086932695  instructions retired\n         10728569086  cycles elapsed\n            27525480  peak memory footprint\n"
+      },
+      "after": {
+        "metrics": [
+          {
+            "median_ms": 991.143542,
+            "p95_ms": 1540.5918330000002,
+            "probe": "startup"
+          },
+          {
+            "median_ms": 816.85475,
+            "p95_ms": 1378.288,
+            "probe": "refresh"
+          },
+          {
+            "median_ms": 1043.3055,
+            "p95_ms": 1612.2533329999999,
+            "probe": "background_refresh"
+          },
+          {
+            "median_ms": 0.165125,
+            "p95_ms": 2.4464159999999997,
+            "probe": "render"
+          },
+          {
+            "median_ms": 335.155,
+            "p95_ms": 623.087083,
+            "probe": "open_diff"
+          },
+          {
+            "median_ms": 1.147334,
+            "p95_ms": 15.613125,
+            "probe": "page_down_100"
+          },
+          {
+            "median_ms": 7.117166999999999,
+            "p95_ms": 43.941083,
+            "probe": "search"
+          },
+          {
+            "median_ms": 1.2145000000000001,
+            "p95_ms": 38.483542,
+            "probe": "session_scroll_100"
+          },
+          {
+            "median_ms": 77.883042,
+            "p95_ms": 88.41320900000001,
+            "probe": "cancel"
+          }
+        ],
+        "maximum_resident_set_size_bytes": 31850496,
+        "resources": "       58.36 real         4.51 user         4.98 sys\n            31850496  maximum resident set size\n                   0  average shared memory size\n                   0  average unshared data size\n                   0  average unshared stack size\n              443201  page reclaims\n                3679  page faults\n                   0  swaps\n                   0  block input operations\n                   0  block output operations\n                   0  messages sent\n                   0  messages received\n                   0  signals received\n                 660  voluntary context switches\n               61330  involuntary context switches\n          2759722441  instructions retired\n          2067614835  cycles elapsed\n            30671232  peak memory footprint\n"
+      }
+    },
+    "history": {
+      "before": {
+        "metrics": [
+          {
+            "median_ms": 980.805709,
+            "p95_ms": 1718.856666,
+            "probe": "startup"
+          },
+          {
+            "median_ms": 673.7872080000001,
+            "p95_ms": 1277.457833,
+            "probe": "refresh"
+          },
+          {
+            "median_ms": 1044.8235829999999,
+            "p95_ms": 2224.978916,
+            "probe": "background_refresh"
+          },
+          {
+            "median_ms": 0.15025,
+            "p95_ms": 0.46741699999999997,
+            "probe": "render"
+          },
+          {
+            "median_ms": 172.57,
+            "p95_ms": 708.075292,
+            "probe": "open_diff"
+          },
+          {
+            "median_ms": 1196.924958,
+            "p95_ms": 1676.153083,
+            "probe": "page_down_100"
+          },
+          {
+            "median_ms": 9.462791999999999,
+            "p95_ms": 105.552,
+            "probe": "search"
+          },
+          {
+            "median_ms": 731.7797499999999,
+            "p95_ms": 2025.015208,
+            "probe": "session_scroll_100"
+          },
+          {
+            "median_ms": 79.119,
+            "p95_ms": 117.42533300000001,
+            "probe": "cancel"
+          }
+        ],
+        "maximum_resident_set_size_bytes": 31473664,
+        "resources": "       87.68 real         9.42 user         5.00 sys\n            31473664  maximum resident set size\n                   0  average shared memory size\n                   0  average unshared data size\n                   0  average unshared stack size\n              449128  page reclaims\n                3726  page faults\n                   0  swaps\n                   0  block input operations\n                   0  block output operations\n                   0  messages sent\n                   0  messages received\n                   0  signals received\n                1568  voluntary context switches\n               82390  involuntary context switches\n         45580087586  instructions retired\n         10759526188  cycles elapsed\n            27050344  peak memory footprint\n"
+      },
+      "after": {
+        "metrics": [
+          {
+            "median_ms": 824.8955,
+            "p95_ms": 1366.3675,
+            "probe": "startup"
+          },
+          {
+            "median_ms": 640.96375,
+            "p95_ms": 1151.066084,
+            "probe": "refresh"
+          },
+          {
+            "median_ms": 642.179833,
+            "p95_ms": 1581.083292,
+            "probe": "background_refresh"
+          },
+          {
+            "median_ms": 0.17758300000000002,
+            "p95_ms": 0.40695899999999996,
+            "probe": "render"
+          },
+          {
+            "median_ms": 142.29875,
+            "p95_ms": 644.492792,
+            "probe": "open_diff"
+          },
+          {
+            "median_ms": 1.569917,
+            "p95_ms": 3.327834,
+            "probe": "page_down_100"
+          },
+          {
+            "median_ms": 5.955042,
+            "p95_ms": 88.70420800000001,
+            "probe": "search"
+          },
+          {
+            "median_ms": 2.415791,
+            "p95_ms": 6.898333,
+            "probe": "session_scroll_100"
+          },
+          {
+            "median_ms": 76.577334,
+            "p95_ms": 96.554125,
+            "probe": "cancel"
+          }
+        ],
+        "maximum_resident_set_size_bytes": 30851072,
+        "resources": "       42.85 real         5.48 user         5.03 sys\n            30851072  maximum resident set size\n                   0  average shared memory size\n                   0  average unshared data size\n                   0  average unshared stack size\n              449297  page reclaims\n                3674  page faults\n                   0  swaps\n                   0  block input operations\n                   0  block output operations\n                   0  messages sent\n                   0  messages received\n                   0  signals received\n                7958  voluntary context switches\n               72664  involuntary context switches\n          3621849640  instructions retired\n          2346016100  cycles elapsed\n            28115328  peak memory footprint\n"
+      }
+    },
+    "files": {
+      "before": {
+        "metrics": [
+          {
+            "median_ms": 1090.1170419999999,
+            "p95_ms": 1687.44125,
+            "probe": "startup"
+          },
+          {
+            "median_ms": 981.897333,
+            "p95_ms": 1540.994375,
+            "probe": "refresh"
+          },
+          {
+            "median_ms": 1109.4372079999998,
+            "p95_ms": 2096.367459,
+            "probe": "background_refresh"
+          },
+          {
+            "median_ms": 6.83075,
+            "p95_ms": 22.820584,
+            "probe": "render"
+          },
+          {
+            "median_ms": 73.288791,
+            "p95_ms": 148.44674999999998,
+            "probe": "open_diff"
+          },
+          {
+            "median_ms": 625.57025,
+            "p95_ms": 1692.161167,
+            "probe": "page_down_100"
+          },
+          {
+            "median_ms": 14.626,
+            "p95_ms": 64.011334,
+            "probe": "search"
+          },
+          {
+            "median_ms": 538.850458,
+            "p95_ms": 1014.4524159999999,
+            "probe": "session_scroll_100"
+          },
+          {
+            "median_ms": 83.411875,
+            "p95_ms": 180.231542,
+            "probe": "cancel"
+          }
+        ],
+        "maximum_resident_set_size_bytes": 16957440,
+        "resources": "       82.75 real         9.49 user        12.71 sys\n            16957440  maximum resident set size\n                   0  average shared memory size\n                   0  average unshared data size\n                   0  average unshared stack size\n              451814  page reclaims\n                3674  page faults\n                   0  swaps\n                   0  block input operations\n                   0  block output operations\n                   0  messages sent\n                   0  messages received\n                   0  signals received\n                 623  voluntary context switches\n              100921  involuntary context switches\n         45533977078  instructions retired\n         10816165215  cycles elapsed\n            14532968  peak memory footprint\n"
+      },
+      "after": {
+        "metrics": [
+          {
+            "median_ms": 1379.268709,
+            "p95_ms": 2363.209875,
+            "probe": "startup"
+          },
+          {
+            "median_ms": 1415.4285,
+            "p95_ms": 2251.832625,
+            "probe": "refresh"
+          },
+          {
+            "median_ms": 1107.87425,
+            "p95_ms": 2402.269708,
+            "probe": "background_refresh"
+          },
+          {
+            "median_ms": 7.241499999999999,
+            "p95_ms": 122.04912499999999,
+            "probe": "render"
+          },
+          {
+            "median_ms": 70.475,
+            "p95_ms": 192.42425,
+            "probe": "open_diff"
+          },
+          {
+            "median_ms": 7.466709,
+            "p95_ms": 203.275084,
+            "probe": "page_down_100"
+          },
+          {
+            "median_ms": 24.153791000000002,
+            "p95_ms": 95.5925,
+            "probe": "search"
+          },
+          {
+            "median_ms": 1.501417,
+            "p95_ms": 52.032333,
+            "probe": "session_scroll_100"
+          },
+          {
+            "median_ms": 67.631459,
+            "p95_ms": 226.403292,
+            "probe": "cancel"
+          }
+        ],
+        "maximum_resident_set_size_bytes": 17727488,
+        "resources": "       71.98 real         5.50 user        12.07 sys\n            17727488  maximum resident set size\n                   0  average shared memory size\n                   0  average unshared data size\n                   0  average unshared stack size\n              451938  page reclaims\n                3707  page faults\n                   0  swaps\n                   0  block input operations\n                   0  block output operations\n                   0  messages sent\n                   0  messages received\n                   0  signals received\n                 538  voluntary context switches\n               78043  involuntary context switches\n          3306978240  instructions retired\n          2468836226  cycles elapsed\n            15171944  peak memory footprint\n"
+      }
+    }
+  },
+  "limits": [
+    "Shared host was busy; results are local observations, not controlled cross-platform guarantees.",
+    "Startup uses 20 history entries; refresh requests up to 3000.",
+    "open_diff navigates through successive entries and clamps at the last one; small cases include the large file.",
+    "Cancel elapsed time includes a 25 ms artificial delay.",
+    "Maximum resident set size is reported by macOS time -l for the entire probe workload."
+  ]
+}

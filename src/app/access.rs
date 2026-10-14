@@ -61,6 +61,11 @@ impl App {
         &self.detail_text
     }
 
+    /// Horizontal offset in rendered terminal cells.
+    pub fn detail_column(&self) -> u16 {
+        self.detail_column
+    }
+
     pub fn detail_scroll(&self) -> u16 {
         self.detail_scroll
     }

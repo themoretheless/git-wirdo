@@ -7,6 +7,7 @@ mod actions;
 mod detail;
 mod keys;
 mod prompts;
+mod selection;
 #[cfg(test)]
 mod tests;
 
@@ -152,7 +153,19 @@ impl App {
     }
 
     pub fn refresh(&mut self) -> Result<()> {
-        // Keep the previous snapshot intact if reading the repository fails.
+        let mut updated = self.clone();
+        updated.refresh_snapshot()?;
+        *self = updated;
+        Ok(())
+    }
+
+    fn refresh_snapshot(&mut self) -> Result<()> {
+        let selected = self.selection_key(self.view, self.selection());
+        let file = self.selection_key(ViewMode::Files, self.file_selection);
+        let history = self.selection_key(ViewMode::History, self.history_selection);
+        let branch = self.selection_key(ViewMode::Branches, self.branch_selection);
+        let viewport = (self.detail_scroll, self.detail_column);
+        let previous_detail = self.detail_text.clone();
         self.state = self
             .repository
             .load_state_with_history(self.history_limit)?;
@@ -190,6 +203,9 @@ impl App {
         if self.browse_tracked {
             self.tracked_files = self.load_tracked_files()?;
         }
+        self.restore_selection(ViewMode::Files, file.as_ref());
+        self.restore_selection(ViewMode::History, history.as_ref());
+        self.restore_selection(ViewMode::Branches, branch.as_ref());
         let displayed = self.displayed_files().len();
         clamp_to(&mut self.file_selection, displayed);
         clamp_to(&mut self.history_selection, self.state.commits.len());
@@ -199,7 +215,16 @@ impl App {
             self.state.merge_state.conflicts.len(),
         );
         self.load_view(true)?;
+        self.restore_selection(self.view, selected.as_ref());
+        let (selection, len) = self.cursor();
+        clamp_to(selection, len);
         self.refresh_detail();
+        if selected.is_some()
+            && self.selection_key(self.view, self.selection()) == selected
+            && self.detail_text == previous_detail
+        {
+            (self.detail_scroll, self.detail_column) = viewport;
+        }
         Ok(())
     }
 
@@ -211,6 +236,7 @@ impl App {
     /// `state_is_fresh` skips data `refresh` has just read, so a refresh runs each
     /// Git command once.
     fn load_view(&mut self, state_is_fresh: bool) -> Result<()> {
+        let selected = self.selection_key(self.view, self.selection());
         match self.view {
             ViewMode::Reflog => self.reflog.items = self.repository.reflog(self.reflog_limit)?,
             ViewMode::History => {
@@ -265,6 +291,7 @@ impl App {
             ViewMode::Files | ViewMode::Branches | ViewMode::Conflicts => {}
             ViewMode::RecentRepositories => {}
         }
+        self.restore_selection(self.view, selected.as_ref());
         let (selection, len) = self.cursor();
         clamp_to(selection, len);
         Ok(())

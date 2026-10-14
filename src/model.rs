@@ -239,3 +239,16 @@ pub struct ReflogEntry {
     pub selector: String,
     pub subject: String,
 }
+
+/// Escape terminal control sequences without changing ordinary Unicode text.
+pub(crate) fn terminal_text(text: &str) -> String {
+    let mut result = String::with_capacity(text.len());
+    for character in text.chars() {
+        if character.is_control() && !matches!(character, '\n' | '\t') {
+            result.extend(character.escape_default());
+        } else {
+            result.push(character);
+        }
+    }
+    result
+}
