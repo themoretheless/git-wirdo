@@ -13,6 +13,9 @@ use crate::model::{ViewMode, display_path};
 /// UI-independent commands; terminal key bindings live in `input`.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Action {
+    FilterList,
+    StageLines,
+    InteractiveRebase,
     CommandPalette,
     ImportPatch,
     BrowseTracked,
@@ -83,7 +86,9 @@ impl Action {
     /// the terminal thread; everything that touches Git or GitHub runs in the worker.
     pub fn runs_locally(self, view: ViewMode) -> bool {
         match self {
-            Self::Quit
+            Self::FilterList
+            | Self::StageLines
+            | Self::Quit
             | Self::CommandPalette
             | Self::ImportPatch
             | Self::ExportCommit
@@ -148,7 +153,67 @@ impl App {
             self.message = "File inspection is read-only; return to working changes first".into();
             return Ok(());
         }
+        if self.filter_view == Some(self.view)
+            && !self.list_filter.is_empty()
+            && matches!(self.view, ViewMode::Files | ViewMode::Branches)
+            && !self.visible_indices().contains(&self.selection())
+            && matches!(
+                action,
+                Action::Stage
+                    | Action::Unstage
+                    | Action::Remove
+                    | Action::RestoreFromIndex
+                    | Action::ToggleSeen
+                    | Action::OpenHunks
+                    | Action::FileHistory
+                    | Action::FileBlame
+                    | Action::SwitchBranch
+                    | Action::RenameBranch
+                    | Action::MergeBranch
+                    | Action::RebaseBranch
+            )
+        {
+            self.notify("No matching selection; clear the name filter first");
+            return Ok(());
+        }
         match action {
+            Action::FilterList if matches!(self.view, ViewMode::Files | ViewMode::Branches) => {
+                self.start_prefilled_prompt(
+                    PromptKind::ListFilter(self.view),
+                    vec!["Name filter (blank clears)"],
+                    vec![if self.filter_view == Some(self.view) {
+                        self.list_filter.clone()
+                    } else {
+                        String::new()
+                    }],
+                );
+            }
+            Action::StageLines
+                if self.view == ViewMode::Hunks
+                    && !self.browse_tracked
+                    && !self.upstream_comparison =>
+            {
+                if let Some(hunk) = self.hunks.selected().cloned() {
+                    self.start_prompt(
+                        WorkingTreePrompt::Lines(hunk),
+                        vec!["Changed-line numbers separated by spaces"],
+                    );
+                }
+            }
+            Action::InteractiveRebase if self.view == ViewMode::History => {
+                if let Some(commit) = self.state.commits.get(self.history_selection) {
+                    let plan = self.repository.prepare_interactive_rebase(&commit.sha)?;
+                    let todo = plan.todo.clone();
+                    self.start_prefilled_prompt(
+                        HistoryPrompt::Interactive(plan),
+                        vec![
+                            "Rebase todo: reorder pick / squash / fixup; Alt-Enter newline",
+                            "Type rebase to rewrite local history",
+                        ],
+                        vec![todo, String::new()],
+                    );
+                }
+            }
             Action::CommandPalette => {
                 self.palette_selection = 0;
                 self.start_prompt(PromptKind::CommandPalette, vec!["Command search"]);

@@ -25,6 +25,7 @@ use super::App;
 
 #[derive(Debug, Clone)]
 pub enum PromptKind {
+    ListFilter(crate::model::ViewMode),
     CommandPalette,
     Repository(RepositoryPrompt),
     WorkingTree(WorkingTreePrompt),
@@ -113,6 +114,23 @@ impl App {
     pub(super) fn submit_prompt(&mut self, prompt: Prompt) -> Result<()> {
         let v = prompt.values;
         let submitted = match prompt.kind {
+            PromptKind::ListFilter(view) => {
+                self.list_filter = v[0].to_lowercase();
+                self.filter_view = Some(view);
+                let visible = self.visible_indices();
+                if !visible.contains(&self.selection())
+                    && let Some(index) = visible.first()
+                {
+                    self.select(*index);
+                }
+                self.refresh_detail();
+                self.notify(format!(
+                    "Filter: {} ({} matches)",
+                    self.list_filter,
+                    visible.len()
+                ));
+                Submitted::Done
+            }
             PromptKind::CommandPalette => self.submit_command_palette(&v[0])?,
             PromptKind::Repository(prompt) => prompt.submit(self, &v)?,
             PromptKind::WorkingTree(prompt) => prompt.submit(self, &v)?,

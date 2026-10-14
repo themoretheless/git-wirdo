@@ -10,6 +10,7 @@ use crate::model::{ViewMode, display_path};
 
 #[derive(Debug, Clone)]
 pub enum HistoryPrompt {
+    Interactive(crate::git::InteractiveRebase),
     ImportPatch,
     ExportCommit(String),
     /// Create a branch at a reflog commit.
@@ -22,6 +23,17 @@ pub enum HistoryPrompt {
 impl HistoryPrompt {
     pub(super) fn submit(self, app: &mut App, v: &[String]) -> Result<Submitted> {
         Ok(match self {
+            Self::Interactive(plan) => {
+                ensure!(v[1] == "rebase", "Rebase cancelled");
+                let result =
+                    app.refresh_after(|app| app.repository.run_interactive_rebase(&plan, &v[0]));
+                if app.state.merge_state.in_progress() {
+                    app.view = ViewMode::Conflicts;
+                    app.refresh_detail();
+                }
+                result?;
+                "Interactive rebase completed; original HEAD retained in recovery refs".into()
+            }
             Self::ImportPatch => {
                 ensure!(v[1] == "apply", "Import cancelled: type apply exactly");
                 let result =
