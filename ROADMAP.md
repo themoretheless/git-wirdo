@@ -179,5 +179,7 @@ successful review verdicts from a second GitHub account need a second account;
 [Consolidation acceptance](https://github.com/themoretheless/git-wirdo/actions/runs/38466337904)
 passed formatting, strict all-target Clippy and every test on Linux (203), macOS
 (202) and Windows (173), including the event-driven redraw through real Unix PTY
-and native ConPTY sessions. Live creation of a GitHub repository through the new
-form has not been exercised against GitHub; the transport is fixture-tested.
+and native ConPTY sessions. Live acceptance on 2026-10-14 created the private
+repository `themoretheless/git-wirdo-live-check` from a throwaway checkout through
+`create_repository`: the checkout gained `origin` fetch/push URLs, GitHub reported
+the repository as empty (no implicit push), and no other remote write occurred.
