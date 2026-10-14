@@ -304,7 +304,7 @@ fn shortcuts(view: ViewMode) -> &'static str {
             "enter open | N initialize | C clone Git | D forget entry | O open path"
         }
         ViewMode::Hunks => {
-            "Space select lines | = numbers | s stage hunk | u unstage hunk | d staged/unstaged | tab files"
+            "Space select lines | = numbers | s stage hunk | u unstage hunk | d staged/unstaged | tab next view"
         }
         ViewMode::Tags => "N create | D delete local | W publish | X delete remote | r refresh",
         ViewMode::Remotes => {

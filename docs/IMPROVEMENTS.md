@@ -161,3 +161,8 @@ passed sequentially. The large Unicode snapshot exposed a test-reader defect:
 continuation cells of wide graphemes were interpreted as spaces. The reader now
 advances by terminal cell width, retaining exact-text assertions and adding an
 independent wide/combining/emoji/real-space decoding check.
+
+The ConPTY flow returns from Hunks through the existing View files palette entry;
+Tab cycles through Reflog and other views instead of jumping directly to Files.
+The Hunks footer now describes that navigation accurately. Git/index/stash oracles
+and terminal deadlines are unchanged.

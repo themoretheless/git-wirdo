@@ -504,7 +504,8 @@ fn visual_lines_live_filters_and_selected_stash_in_conpty() {
     terminal.key(b"j", "2 selected");
     terminal.key(b"s", "Updated selected lines in index");
     assert_eq!(repo.git(&["show", ":zzz"]), "ONE\ntwo\nthree\n");
-    terminal.key(b"\t", "View: Files");
+    terminal.key(b":", "Commands:");
+    terminal.field("View files", "View: Files");
     terminal.key(b" ", "1 files selected for stash");
     terminal.key(b"$", "Selected stash message");
     terminal.field("only zzz", "Type stash");
