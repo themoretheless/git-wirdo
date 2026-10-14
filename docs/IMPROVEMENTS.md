@@ -153,3 +153,11 @@ The concurrent auto-reload change from PR #6 is included. Polling explicitly wai
 while either visual editor is open, then resumes after close; captured selections
 still use exact-diff/HEAD checks at mutation. The integration regression checks
 both editors, retained drafts and the subsequent external-file reload.
+
+Validation note: local checks use installed Rust 1.98.1 because default nightly
+Cargo became unavailable during the run. Parallel local PTY runs reached the
+unchanged 20-second deadline while Git was still running; all 20 terminal workflows
+passed sequentially. The large Unicode snapshot exposed a test-reader defect:
+continuation cells of wide graphemes were interpreted as spaces. The reader now
+advances by terminal cell width, retaining exact-text assertions and adding an
+independent wide/combining/emoji/real-space decoding check.

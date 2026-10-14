@@ -10,15 +10,31 @@ fn screen(app: &App, width: u16, height: u16) -> String {
     let mut terminal = Terminal::new(TestBackend::new(width, height)).unwrap();
     let mut ui = Ui::default();
     terminal.draw(|frame| ui.draw(frame, app)).unwrap();
-    let buffer = terminal.backend().buffer();
+    buffer_text(terminal.backend().buffer(), width, height)
+}
+
+fn buffer_text(buffer: &ratatui::buffer::Buffer, width: u16, height: u16) -> String {
     (0..height)
         .map(|y| {
-            (0..width)
-                .map(|x| buffer[(x, y)].symbol())
-                .collect::<String>()
+            let mut row = String::new();
+            let mut x = 0usize;
+            while x < usize::from(width) {
+                let symbol = buffer[(x as u16, y)].symbol();
+                row.push_str(symbol);
+                // Continuation cells are storage for a wide grapheme, not literal spaces.
+                x += ratatui::text::Span::raw(symbol).width().max(1);
+            }
+            row
         })
         .collect::<Vec<_>>()
         .join("\n")
+}
+
+#[test]
+fn snapshot_decoder_keeps_wide_graphemes_combining_marks_and_real_spaces() {
+    let mut buffer = ratatui::buffer::Buffer::empty(ratatui::layout::Rect::new(0, 0, 20, 1));
+    buffer.set_string(0, 0, "界 a\u{301} 🦀!", ratatui::style::Style::default());
+    assert_eq!(buffer_text(&buffer, 20, 1).trim_end(), "界 a\u{301} 🦀!");
 }
 
 #[test]
