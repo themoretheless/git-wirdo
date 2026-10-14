@@ -10,6 +10,15 @@ pub(super) enum SelectionKey {
     Hunk(PathBuf, Vec<u8>),
 }
 impl App {
+    pub(crate) fn same_selected_object(&self, other: &Self) -> bool {
+        self.view == other.view
+            && self
+                .selection_key(self.view, self.selection())
+                .is_some_and(|key| {
+                    other.selection_key(other.view, other.selection()).as_ref() == Some(&key)
+                })
+    }
+
     pub(super) fn selection_key(&self, view: ViewMode, index: usize) -> Option<SelectionKey> {
         use SelectionKey::{Hunk, Path, Pr, Text};
         Some(match view {
@@ -17,19 +26,23 @@ impl App {
             ViewMode::History => Text(self.state.commits.get(index)?.sha.clone()),
             ViewMode::Branches => Text(self.state.branches.get(index)?.name.clone()),
             ViewMode::Conflicts => Path(self.state.merge_state.conflicts.get(index)?.clone()),
-            ViewMode::Workspaces => Path(self.workspaces.get(index)?.path.clone()),
-            ViewMode::PullRequests => Pr(self.pull_requests.get(index)?.number),
-            ViewMode::GitHubRepositories => {
-                Text(self.github_repositories.get(index)?.name_with_owner.clone())
-            }
-            ViewMode::Stashes => Text(self.stashes.get(index)?.sha.clone()),
-            ViewMode::Remotes => Text(self.remotes.get(index)?.name.clone()),
-            ViewMode::RemoteBranches => Text(self.remote_branches.get(index)?.clone()),
-            ViewMode::Tags => Text(self.tags.get(index)?.name.clone()),
-            ViewMode::Reflog => Text(self.reflog.get(index)?.sha.clone()),
-            ViewMode::PrFiles => Text(self.pr_files.get(index)?.filename.clone()),
+            ViewMode::Workspaces => Path(self.workspaces.items.get(index)?.path.clone()),
+            ViewMode::PullRequests => Pr(self.pull_requests.items.get(index)?.number),
+            ViewMode::GitHubRepositories => Text(
+                self.github_repositories
+                    .items
+                    .get(index)?
+                    .name_with_owner
+                    .clone(),
+            ),
+            ViewMode::Stashes => Text(self.stashes.items.get(index)?.sha.clone()),
+            ViewMode::Remotes => Text(self.remotes.items.get(index)?.name.clone()),
+            ViewMode::RemoteBranches => Text(self.remote_branches.items.get(index)?.clone()),
+            ViewMode::Tags => Text(self.tags.items.get(index)?.name.clone()),
+            ViewMode::Reflog => Text(self.reflog.items.get(index)?.sha.clone()),
+            ViewMode::PrFiles => Text(self.pr_files.items.get(index)?.filename.clone()),
             ViewMode::Hunks => {
-                let hunk = self.hunks.get(index)?;
+                let hunk = self.hunks.items.get(index)?;
                 Hunk(hunk.file.path.clone(), hunk.patch.clone())
             }
             ViewMode::RecentRepositories => {
@@ -46,11 +59,18 @@ impl App {
             ViewMode::Files => self.displayed_files().len(),
             ViewMode::History => self.state.commits.len(),
             ViewMode::Branches => self.state.branches.len(),
-            _ if view == self.view => self.list_len(),
+            _ if view == self.view => self.cursor().1,
             _ => return,
         };
         if let Some(index) = (0..len).find(|&i| self.selection_key(view, i).as_ref() == Some(key)) {
-            *self.selection_mut_for(view) = index;
+            match view {
+                ViewMode::Files => self.file_selection = index,
+                ViewMode::History => self.history_selection = index,
+                ViewMode::Branches => self.branch_selection = index,
+                _ => {
+                    *self.cursor().0 = index;
+                }
+            }
         }
     }
 }

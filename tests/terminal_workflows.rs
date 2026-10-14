@@ -700,7 +700,8 @@ fn mail_import_conflicts_can_be_resolved_or_aborted_through_terminal_controls() 
         terminal.key(b"@", "Mail patch file:");
         terminal.field(path.to_str().unwrap(), "Type apply to import commits");
         terminal.field("apply", "View: Conflicts");
-        terminal.key(b"r", "Mail patch import in progress");
+        terminal.key(b"r", "Action: Refreshed");
+        terminal.expect("Mail patch import in progress");
         if abort {
             terminal.key(b"x", "Aborted Git operation");
             assert_eq!(target.git(&["rev-parse", "HEAD"]), before);

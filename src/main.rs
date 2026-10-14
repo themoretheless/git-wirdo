@@ -109,6 +109,26 @@ struct Cli {
     headless: bool,
 }
 
+impl Cli {
+    /// Whether a non-interactive inspection command was requested (the clap
+    /// "inspection" group, except --list-recent, which runs before a repository opens).
+    fn requests_inspection(&self) -> bool {
+        self.list_files
+            || self.import_patch.is_some()
+            || self.export_patch.is_some()
+            || self.file_history.is_some()
+            || self.blame.is_some()
+            || self.list_workspaces
+            || self.list_stashes
+            || self.list_tags
+            || self.list_reflog
+            || self.list_prs
+            || self.list_github_repos
+            || self.pr.is_some()
+            || self.pr_files.is_some()
+    }
+}
+
 fn main() -> Result<()> {
     let cli = Cli::parse();
     if cli.github_login {
@@ -125,6 +145,12 @@ fn main() -> Result<()> {
             .map(Ok)
             .unwrap_or_else(git_wirdo::settings::default_path)
     };
+    if cli.list_recent {
+        for settings in git_wirdo::settings::load(&settings_path()?)?.repositories {
+            println!("{}", display_path(&settings.root.path()?));
+        }
+        return Ok(());
+    }
     // --no-state disables persistence entirely; otherwise the configured state file is used.
     let state_path = || -> Result<Option<PathBuf>> {
         if cli.no_state {
@@ -133,12 +159,6 @@ fn main() -> Result<()> {
             settings_path().map(Some)
         }
     };
-    if cli.list_recent {
-        for settings in git_wirdo::settings::load(&settings_path()?)?.repositories {
-            println!("{}", display_path(&settings.root.path()?));
-        }
-        return Ok(());
-    }
     let explicit_repo = cli.repo.is_some();
     let path = match &cli.repo {
         Some(path) => path.clone(),
@@ -156,12 +176,12 @@ fn main() -> Result<()> {
             Some(repository) => repository,
             None => return Ok(()),
         }
-    } else if let Some(destination) = cli.init {
-        Repository::initialize(&path, &destination, &cli.initial_branch)?
-    } else if let Some(source) = cli.clone {
+    } else if let Some(destination) = &cli.init {
+        Repository::initialize(&path, destination, &cli.initial_branch)?
+    } else if let Some(source) = &cli.clone {
         Repository::clone_into(
             &path,
-            &source,
+            source,
             cli.destination
                 .as_deref()
                 .expect("clap requires destination"),
@@ -171,19 +191,7 @@ fn main() -> Result<()> {
             Ok(repository) => repository,
             Err(error) => {
                 use std::io::IsTerminal;
-                let inspection = cli.list_files
-                    || cli.import_patch.is_some()
-                    || cli.export_patch.is_some()
-                    || cli.file_history.is_some()
-                    || cli.blame.is_some()
-                    || cli.list_workspaces
-                    || cli.list_stashes
-                    || cli.list_tags
-                    || cli.list_reflog
-                    || cli.list_prs
-                    || cli.list_github_repos
-                    || cli.pr.is_some()
-                    || cli.pr_files.is_some();
+                let inspection = cli.requests_inspection();
                 if !cli.resume
                     && !explicit_repo
                     && !cli.headless
@@ -201,35 +209,44 @@ fn main() -> Result<()> {
             }
         }
     };
-    if let Some(path) = cli.import_patch {
-        repository.import_mail_patch(&path)?;
-        println!("Imported mail patch");
+    if inspect(&cli, &repository)? {
         return Ok(());
+    }
+    terminal::run(repository, state_path()?)
+}
+
+/// Commands that print repository information and exit without the terminal UI.
+/// Returns false when the invocation asks for the interactive UI instead.
+fn inspect(cli: &Cli, repository: &Repository) -> Result<bool> {
+    if let Some(path) = &cli.import_patch {
+        repository.import_mail_patch(path)?;
+        println!("Imported mail patch");
+        return Ok(true);
     }
     if cli.list_files {
         for file in repository.tracked_files()? {
             println!("{}", display_path(&file.path));
         }
-        return Ok(());
+        return Ok(true);
     }
-    if let Some(revision) = cli.export_patch {
+    if let Some(revision) = &cli.export_patch {
         let path = repository.export_commit(
-            &revision,
+            revision,
             cli.output.as_deref().context("Missing patch destination")?,
         )?;
         println!("Exported mail patch {}", display_path(&path));
-        return Ok(());
+        return Ok(true);
     }
-    if let Some(path) = cli.file_history {
+    if let Some(path) = &cli.file_history {
         print!(
             "{}",
-            repository.file_history(&path, cli.file_limit as usize)?
+            repository.file_history(path, cli.file_limit as usize)?
         );
-        return Ok(());
+        return Ok(true);
     }
-    if let Some(path) = cli.blame {
-        print!("{}", repository.file_blame(&path)?);
-        return Ok(());
+    if let Some(path) = &cli.blame {
+        print!("{}", repository.file_blame(path)?);
+        return Ok(true);
     }
     if cli.list_reflog {
         for entry in repository.reflog(100)? {
@@ -240,7 +257,7 @@ fn main() -> Result<()> {
                 entry.subject.escape_debug()
             );
         }
-        return Ok(());
+        return Ok(true);
     }
     if cli.list_tags {
         for tag in repository.tags()? {
@@ -252,7 +269,7 @@ fn main() -> Result<()> {
                 tag.subject.escape_debug()
             );
         }
-        return Ok(());
+        return Ok(true);
     }
     if cli.list_stashes {
         for stash in repository.stashes()? {
@@ -263,7 +280,7 @@ fn main() -> Result<()> {
                 stash.subject.escape_debug()
             );
         }
-        return Ok(());
+        return Ok(true);
     }
     if cli.list_workspaces {
         for workspace in repository.workspaces()? {
@@ -274,31 +291,31 @@ fn main() -> Result<()> {
                 if workspace.locked { " [locked]" } else { "" }
             );
         }
-        return Ok(());
+        return Ok(true);
     }
     if let Some(number) = cli.pr_files {
         let pr = git_wirdo::github::get_pr(repository.root(), number)?;
         for file in git_wirdo::pr_review::reviewed_files(repository.root(), &pr)? {
             println!("{}", file.detail(&pr)?);
         }
-        return Ok(());
+        return Ok(true);
     }
     if cli.list_prs {
         let filter = git_wirdo::github::PrFilter {
-            state: cli.pr_state,
-            search: cli.pr_search,
+            state: cli.pr_state.clone(),
+            search: cli.pr_search.clone(),
             limit: cli.pr_limit,
         };
         for pr in git_wirdo::github::list_filtered(repository.root(), &filter)? {
             println!("#{} {} {}", pr.number, pr.title.escape_debug(), pr.url);
         }
-        return Ok(());
+        return Ok(true);
     }
     if cli.list_github_repos {
         for repo in git_wirdo::github::repositories(repository.root())? {
             println!("{} {}", repo.name_with_owner, repo.url);
         }
-        return Ok(());
+        return Ok(true);
     }
     if let Some(number) = cli.pr {
         println!(
@@ -306,7 +323,7 @@ fn main() -> Result<()> {
             git_wirdo::github::detail(repository.root(), number)?,
             git_wirdo::pr_review::comments(repository.root(), number)?
         );
-        return Ok(());
+        return Ok(true);
     }
     if cli.headless {
         let state = repository.load_state()?;
@@ -332,7 +349,49 @@ fn main() -> Result<()> {
                 file.label()
             );
         }
-        return Ok(());
+        return Ok(true);
     }
-    terminal::run(repository, state_path()?)
+    Ok(false)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use clap::CommandFactory;
+
+    #[test]
+    fn every_inspection_flag_bypasses_the_startup_screen() {
+        let mut command = Cli::command();
+        // Groups named only on arguments exist after the command is built.
+        command.build();
+        let group = command
+            .get_groups()
+            .find(|group| group.get_id() == "inspection")
+            .expect("inspection group");
+        for id in group.get_args() {
+            if id == "list_recent" {
+                continue;
+            }
+            let arg = command
+                .get_arguments()
+                .find(|arg| arg.get_id() == id)
+                .expect("group member is an argument");
+            let mut argv = vec![
+                "git-wirdo".to_owned(),
+                format!("--{}", arg.get_long().unwrap()),
+            ];
+            if arg.get_action().takes_values() {
+                argv.push("1".into());
+            }
+            if id == "export_patch" {
+                argv.extend(["--output".into(), "patch".into()]);
+            }
+            let cli =
+                Cli::try_parse_from(&argv).unwrap_or_else(|error| panic!("{argv:?}: {error}"));
+            assert!(
+                cli.requests_inspection(),
+                "{id} is not treated as inspection"
+            );
+        }
+    }
 }

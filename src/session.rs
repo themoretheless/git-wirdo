@@ -56,7 +56,8 @@ impl Session {
         let job = self.job.take().unwrap();
         match job.worker.join() {
             Ok((mut updated, recovery_required)) => {
-                if updated.detail_text == self.app.detail_text
+                if updated.same_selected_object(&self.app)
+                    && updated.detail_text == self.app.detail_text
                     && job.scroll_revision != self.scroll_revision
                 {
                     updated.detail_scroll = self.app.detail_scroll;
@@ -192,8 +193,8 @@ impl Session {
             self.app.handle_paste(text);
         }
     }
-    /// Keys handled on the UI thread: modal text entry, viewport scrolling and quitting.
-    /// Everything that may run Git or GitHub goes through the background worker.
+    /// Keys that only edit a prompt, a search or UI state never leave the terminal thread;
+    /// the final Enter of a prompt and every Git/GitHub action go to the worker.
     fn local_key(&self, key: KeyEvent) -> bool {
         let action = action_for_key(key);
         if action == Some(Action::Quit) {
@@ -207,7 +208,7 @@ impl Session {
         if self.app.searching {
             return key.code != KeyCode::Enter;
         }
-        action.is_some_and(|action| self.app.runs_locally(action))
+        action.is_some_and(|action| action.runs_locally(self.app.view))
     }
 }
 impl Drop for Session {
@@ -278,5 +279,36 @@ mod tests {
             thread::sleep(std::time::Duration::from_millis(5));
         }
         assert!(repo.open().load_state().unwrap().files[0].staged);
+    }
+    #[test]
+    fn busy_scroll_does_not_transfer_to_another_file_with_identical_preview() {
+        let repo = crate::test_support::TestRepo::new();
+        let content = "same text\n".repeat(60);
+        std::fs::write(repo.open().root().join("a"), &content).unwrap();
+        std::fs::write(repo.open().root().join("b"), &content).unwrap();
+        let mut session = Session::new(App::new(repo.open()).unwrap());
+        let mut updated = session.app.clone();
+        updated.handle(crate::app::Action::NextItem);
+        assert_eq!(updated.detail_text, session.app.detail_text);
+        session.app.handle(crate::app::Action::PageDown);
+        session.scroll_revision = 1;
+        let worker = thread::spawn(move || (updated, false));
+        while !worker.is_finished() {
+            thread::yield_now();
+        }
+        session.job = Some(Job {
+            scroll_revision: 0,
+            worker,
+            control: Arc::new(Control::default()),
+            closing: Arc::new(AtomicBool::new(false)),
+            started: Instant::now(),
+            description: "navigation".into(),
+        });
+        session.tick();
+        assert_eq!(session.app.file_selection, 1);
+        assert_eq!(
+            session.app.detail_scroll, 0,
+            "scroll belongs to a different file"
+        );
     }
 }

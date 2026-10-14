@@ -1,7 +1,7 @@
 #![cfg(unix)]
 mod support;
 use std::{fs, path::Path};
-use support::{TempDirectory, TestRepo, terminal::TerminalFixture};
+use support::{TempDirectory, TestRepo, process_gone, terminal::TerminalFixture};
 fn binary() -> &'static Path {
     Path::new(env!("CARGO_BIN_EXE_git-wirdo"))
 }
@@ -130,11 +130,11 @@ fn blocked_clone(quit: bool) {
     };
     if quit {
         terminal.quit();
-        assert_eq!(unsafe { libc::kill(pid, 0) }, -1);
+        assert!(process_gone(pid), "clone helper {pid} still running");
         return;
     }
     terminal.key(b"\x1b", "Operation cancelled");
-    assert_eq!(unsafe { libc::kill(pid, 0) }, -1);
+    assert!(process_gone(pid), "clone helper {pid} still running");
     terminal.key(b"O", "Repository path:");
     terminal.field("repo", "Branch: main");
     terminal.quit();
@@ -146,7 +146,7 @@ fn startup_recent_repository_opens_from_saved_state_without_initializing_current
     source.write("dirty", "retained");
     let state = source.directory.0.join("navigation.json");
     let app = git_wirdo::app::App::new(source.open()).unwrap();
-    git_wirdo::settings::save(&state, &app.navigation).unwrap();
+    git_wirdo::settings::save(&state, app.navigation()).unwrap();
     let mut terminal = TerminalFixture::spawn_saved_starting(binary(), &state, |command| {
         command.current_dir(&source.directory.0);
     });
@@ -173,7 +173,7 @@ fn long_recent_list_keeps_selected_path_and_operation_controls_visible() {
     source.write("last-entry-work", "retained");
     let state = source.directory.0.join("navigation.json");
     let app = git_wirdo::app::App::new(source.open()).unwrap();
-    let mut navigation = app.navigation.clone();
+    let mut navigation = app.navigation().clone();
     let mut actual = navigation.repositories[0].clone();
     actual.last_opened = 0;
     navigation.repositories = (1..=49)

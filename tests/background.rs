@@ -19,7 +19,7 @@ fn finish(session: &mut Session) {
         assert!(
             Instant::now() < deadline,
             "background task never finished: {}",
-            session.app.message
+            session.app.message()
         );
         session.tick();
         thread::sleep(Duration::from_millis(10));
@@ -32,7 +32,7 @@ fn modal_input_is_immediate_and_commit_runs_as_one_serialized_task() {
     r.git(&["add", "file"]);
     let mut session = Session::new(App::new(r.open()).unwrap());
     session.handle_key(key('c'));
-    assert!(!session.busy() && session.app.prompt.is_some());
+    assert!(!session.busy() && session.app.prompt().is_some());
     for c in "background commit".chars() {
         session.handle_key(key(c));
     }
@@ -42,15 +42,15 @@ fn modal_input_is_immediate_and_commit_runs_as_one_serialized_task() {
     session.handle_key(key('c'));
     finish(&mut session);
     assert!(
-        session.app.prompt.is_none() && !session.app.message_is_error,
+        session.app.prompt().is_none() && !session.app.message_is_error(),
         "{}",
-        session.app.message
+        session.app.message()
     );
     assert_eq!(
         r.git(&["log", "-1", "--format=%s"]).trim(),
         "background commit"
     );
-    assert!(session.app.state.files.is_empty());
+    assert!(session.app.state().files.is_empty());
 }
 #[test]
 fn asynchronous_navigation_and_refresh_return_updated_snapshots() {
@@ -60,11 +60,11 @@ fn asynchronous_navigation_and_refresh_return_updated_snapshots() {
     let mut session = Session::new(App::new(r.open()).unwrap());
     session.handle_key(KeyEvent::new(KeyCode::Tab, KeyModifiers::NONE));
     finish(&mut session);
-    assert_eq!(session.app.view, git_wirdo::model::ViewMode::History);
-    assert!(session.app.detail_text.contains("first"));
+    assert_eq!(session.app.view(), git_wirdo::model::ViewMode::History);
+    assert!(session.app.detail_text().contains("first"));
     session.handle_key(key('g'));
     finish(&mut session);
-    assert!(session.app.graph_visible && session.app.detail_text.contains("*"));
+    assert!(session.app.graph_visible() && session.app.detail_text().contains("*"));
 }
 
 #[test]
@@ -91,12 +91,12 @@ fn completed_search_and_next_match_keep_the_workers_selected_viewport() {
     session.handle_paste("needle");
     session.handle_key(KeyEvent::new(KeyCode::Enter, KeyModifiers::NONE));
     finish(&mut session);
-    let first = session.app.detail_scroll;
+    let first = session.app.detail_scroll();
     assert!(first > 0);
     assert!(
         session
             .app
-            .detail_text
+            .detail_text()
             .lines()
             .nth(usize::from(first))
             .unwrap()
@@ -104,13 +104,13 @@ fn completed_search_and_next_match_keep_the_workers_selected_viewport() {
     );
     session.handle_key(key('n'));
     finish(&mut session);
-    assert!(session.app.detail_scroll > first);
+    assert!(session.app.detail_scroll() > first);
     assert!(
         session
             .app
-            .detail_text
+            .detail_text()
             .lines()
-            .nth(usize::from(session.app.detail_scroll))
+            .nth(usize::from(session.app.detail_scroll()))
             .unwrap()
             .contains("needle SECOND")
     );
@@ -198,13 +198,7 @@ fn assert_descendant_stopped(r: &TestRepo) {
         .parse::<i32>()
         .unwrap();
     let deadline = Instant::now() + Duration::from_secs(3);
-    while unsafe { libc::kill(pid, 0) } == 0 {
-        // Linux may retain an orphan zombie briefly; it cannot execute or retain pipes.
-        if let Ok(status) = std::fs::read_to_string(format!("/proc/{pid}/stat"))
-            && status.split_whitespace().nth(2) == Some("Z")
-        {
-            return;
-        }
+    while !support::process_gone(pid) {
         assert!(Instant::now() < deadline, "hook descendant still alive");
         thread::sleep(Duration::from_millis(10));
     }
@@ -215,20 +209,20 @@ fn hook_can_be_cancelled_without_committing_and_tui_remains_usable() {
     let (r, mut session) = slow_commit();
     let head = r.git(&["rev-parse", "HEAD"]);
     session.handle_key(KeyEvent::new(KeyCode::PageDown, KeyModifiers::NONE));
-    assert!(session.busy() && session.app.running);
-    let scrolled = session.app.detail_scroll;
+    assert!(session.busy() && session.app.running());
+    let scrolled = session.app.detail_scroll();
     assert!(scrolled > 0);
     session.handle_key(KeyEvent::new(KeyCode::Esc, KeyModifiers::NONE));
     finish(&mut session);
-    assert!(session.app.message_is_error && session.app.message.contains("cancelled"));
+    assert!(session.app.message_is_error() && session.app.message().contains("cancelled"));
     assert_eq!(r.git(&["rev-parse", "HEAD"]), head);
     assert_eq!(r.git(&["show", ":file"]), "staged");
-    assert!(session.app.state.files.iter().any(|f| f.staged));
-    assert_eq!(session.app.detail_scroll, scrolled);
+    assert!(session.app.state().files.iter().any(|f| f.staged));
+    assert_eq!(session.app.detail_scroll(), scrolled);
     assert_descendant_stopped(&r);
     session.handle_key(key('r'));
     finish(&mut session);
-    assert!(!session.app.message_is_error);
+    assert!(!session.app.message_is_error());
 }
 #[cfg(unix)]
 #[test]
@@ -239,7 +233,7 @@ fn quit_and_drop_cancel_pending_hooks_before_returning() {
         if explicit_quit {
             session.handle_key(key('q'));
             finish(&mut session);
-            assert!(!session.app.running);
+            assert!(!session.app.running());
         }
         let stopped = Instant::now();
         drop(session);
@@ -319,14 +313,14 @@ fn uncooperative_descendants_are_forced_down_after_the_grace_period() {
 fn pr_modal_shortcut_letters_and_multiline_paste_remain_immediate_text() {
     let r = TestRepo::new();
     let mut app = App::new(r.open()).unwrap();
-    app.view = git_wirdo::model::ViewMode::PullRequests;
+    app.set_view(git_wirdo::model::ViewMode::PullRequests);
     app.handle(git_wirdo::app::Action::Commit);
     let mut session = Session::new(app);
     session.handle_key(key('L'));
     session.handle_key(key('M'));
     session.handle_paste("\nqPcs");
-    assert!(!session.busy() && session.app.running);
-    assert_eq!(session.app.prompt.as_ref().unwrap().text, "LM\nqPcs");
+    assert!(!session.busy() && session.app.running());
+    assert_eq!(session.app.prompt().as_ref().unwrap().text, "LM\nqPcs");
 }
 
 #[cfg(unix)]
@@ -341,9 +335,9 @@ fn cancelled_operation_with_failed_reload_blocks_mutations_until_recovery() {
     session.handle_key(KeyEvent::new(KeyCode::Esc, KeyModifiers::NONE));
     finish(&mut session);
     assert!(
-        session.app.message.contains("refresh failed"),
+        session.app.message().contains("refresh failed"),
         "{}",
-        session.app.message
+        session.app.message()
     );
     std::fs::rename(&hidden, &git_dir).unwrap();
     session.handle_key(key('u'));
@@ -360,7 +354,7 @@ fn cancelled_operation_with_failed_reload_blocks_mutations_until_recovery() {
     assert_descendant_stopped(&repo);
     session.handle_key(key('r'));
     finish(&mut session);
-    assert!(!session.app.message_is_error, "{}", session.app.message);
+    assert!(!session.app.message_is_error(), "{}", session.app.message());
     session.handle_key(key('u'));
     finish(&mut session);
     assert!(repo.git(&["diff", "--cached", "--name-only"]).is_empty());

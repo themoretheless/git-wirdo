@@ -11,25 +11,28 @@ fn restart_restores_per_working_tree_settings_without_saving_transient_targets()
     let repo = TestRepo::new();
     let path = repo.directory.0.join("state.json");
     let mut app = App::new(repo.open()).unwrap();
-    app.view = ViewMode::History;
-    app.history_limit = 120;
-    app.graph_visible = true;
-    app.pr_filter.state = "all".into();
-    app.pr_filter.search = "author:@me label:bug".into();
+    app.set_view(ViewMode::History);
+    app.set_history_window(120, true);
+    let mut filter = app.pr_filter().clone();
+    filter.state = "all".into();
+    filter.search = "author:@me label:bug".into();
+    app.set_pr_filter(filter);
     app.capture_navigation();
-    settings::save(&path, &app.navigation).unwrap();
+    settings::save(&path, app.navigation()).unwrap();
     let mut restarted = App::new(repo.open()).unwrap();
     restarted.restore_navigation(settings::load(&path).unwrap());
-    assert_eq!(restarted.view, ViewMode::History);
-    assert_eq!(restarted.history_limit, 120);
-    assert!(restarted.graph_visible);
-    assert_eq!(restarted.pr_filter, app.pr_filter);
+    assert_eq!(restarted.view(), ViewMode::History);
+    assert_eq!(restarted.history_limit(), 120);
+    assert!(restarted.graph_visible());
+    assert_eq!(restarted.pr_filter(), app.pr_filter());
     assert!(
-        restarted.prompt.is_none() && restarted.review_pr.is_none() && restarted.seen.is_empty()
+        restarted.prompt().is_none()
+            && restarted.review_pr().is_none()
+            && restarted.seen_file_count() == 0
     );
-    restarted.view = ViewMode::PrFiles;
+    restarted.set_view(ViewMode::PrFiles);
     restarted.capture_navigation();
-    settings::save(&path, &restarted.navigation).unwrap();
+    settings::save(&path, restarted.navigation()).unwrap();
     assert_eq!(
         settings::load(&path).unwrap().repositories[0].view,
         ViewMode::Files
@@ -47,30 +50,30 @@ fn recent_open_keeps_unsaved_files_and_settings_on_both_working_trees() {
     repo.write("file", "unsaved");
     let other = git_wirdo::git::Repository::open(&worktree).unwrap();
     let mut other_app = App::new(other).unwrap();
-    other_app.view = ViewMode::Branches;
+    other_app.set_view(ViewMode::Branches);
     other_app.capture_navigation();
     let mut app = App::new(repo.open()).unwrap();
-    app.restore_navigation(other_app.navigation);
-    app.view = ViewMode::History;
-    app.graph_visible = true;
+    app.restore_navigation(other_app.into_navigation());
+    app.set_view(ViewMode::History);
+    app.set_history_window(app.history_limit(), true);
     app.handle(Action::RecentRepositories);
-    assert_eq!(app.navigation.repositories.len(), 2);
-    app.recent_selection = 1;
+    assert_eq!(app.navigation().repositories.len(), 2);
+    app.select(1);
     app.handle(Action::SwitchBranch);
     assert_eq!(
-        app.repository.root().canonicalize().unwrap(),
+        app.repository().root().canonicalize().unwrap(),
         worktree.canonicalize().unwrap()
     );
-    assert_eq!(app.view, ViewMode::Branches);
+    assert_eq!(app.view(), ViewMode::Branches);
     app.handle(Action::RecentRepositories);
-    app.recent_selection = 1;
+    app.select(1);
     app.handle(Action::SwitchBranch);
     assert_eq!(
-        app.repository.root().canonicalize().unwrap(),
+        app.repository().root().canonicalize().unwrap(),
         repo.path.canonicalize().unwrap()
     );
-    assert_eq!(app.view, ViewMode::History);
-    assert!(app.graph_visible);
+    assert_eq!(app.view(), ViewMode::History);
+    assert!(app.graph_visible());
     assert_eq!(
         std::fs::read_to_string(repo.path.join("file")).unwrap(),
         "unsaved"
@@ -83,21 +86,21 @@ fn missing_recent_path_does_not_replace_current_repo_and_forget_does_not_delete_
     let current = TestRepo::new();
     let other = TestRepo::new();
     let mut app = App::new(current.open()).unwrap();
-    app.restore_navigation(App::new(other.open()).unwrap().navigation);
+    app.restore_navigation(App::new(other.open()).unwrap().into_navigation());
     app.handle(Action::RecentRepositories);
-    app.recent_selection = 1;
+    app.select(1);
     std::fs::rename(&other.path, other.directory.0.join("moved")).unwrap();
-    let before = app.navigation.clone();
+    let before = app.navigation().clone();
     app.handle(Action::SwitchBranch);
-    assert!(app.message_is_error);
+    assert!(app.message_is_error());
     assert_eq!(
-        app.repository.root().canonicalize().unwrap(),
+        app.repository().root().canonicalize().unwrap(),
         current.path.canonicalize().unwrap()
     );
-    assert_eq!(app.navigation, before);
+    assert_eq!(app.navigation(), &before);
     app.handle(Action::Remove);
     app.capture_navigation();
-    assert_eq!(app.navigation.repositories.len(), 1);
+    assert_eq!(app.navigation().repositories.len(), 1);
     assert!(other.directory.0.join("moved/.git").exists());
 }
 
@@ -121,7 +124,7 @@ fn corrupt_unsupported_and_oversized_settings_are_preserved() {
 fn invalid_saved_paths_limits_and_duplicates_are_rejected_before_restore() {
     let repo = TestRepo::new();
     let path = repo.directory.0.join("state.json");
-    let valid = serde_json::to_value(App::new(repo.open()).unwrap().navigation).unwrap();
+    let valid = serde_json::to_value(App::new(repo.open()).unwrap().navigation()).unwrap();
     let mut samples = Vec::new();
     let mut json = valid.clone();
     json["repositories"][0]["root"]["units"] = serde_json::json!([0]);
@@ -186,8 +189,8 @@ fn interleaved_clients_merge_other_repositories_and_honor_forgetting() {
     let (mut second, _) = Store::open(path.clone()).unwrap();
     let one_app = App::new(one.open()).unwrap();
     let two_app = App::new(two.open()).unwrap();
-    first.persist(&one_app.navigation).unwrap();
-    let merged = second.persist(&two_app.navigation).unwrap();
+    first.persist(one_app.navigation()).unwrap();
+    let merged = second.persist(two_app.navigation()).unwrap();
     assert_eq!(merged.repositories.len(), 2);
     assert_eq!(
         merged.repositories[0].root,
@@ -200,9 +203,9 @@ fn interleaved_clients_merge_other_repositories_and_honor_forgetting() {
     forgetter.persist(&navigation).unwrap();
     assert_eq!(settings::load(&path).unwrap().repositories.len(), 1);
     let mut changed = two_app;
-    changed.graph_visible = true;
+    changed.set_history_window(changed.history_limit(), true);
     changed.capture_navigation();
-    second.persist(&changed.navigation).unwrap();
+    second.persist(changed.navigation()).unwrap();
     assert_eq!(settings::load(&path).unwrap().repositories.len(), 1);
     assert!(settings::load(&path).unwrap().repositories[0].graph_visible);
 }
@@ -216,9 +219,9 @@ fn reopening_current_root_updates_recency_without_erasing_another_clients_root()
     let (mut first, _) = Store::open(path.clone()).unwrap();
     let (mut second, _) = Store::open(path.clone()).unwrap();
     let mut app = App::new(one.open()).unwrap();
-    first.persist(&app.navigation).unwrap();
+    first.persist(app.navigation()).unwrap();
     second
-        .persist(&App::new(two.open()).unwrap().navigation)
+        .persist(App::new(two.open()).unwrap().navigation())
         .unwrap();
     assert_eq!(
         settings::load(&path).unwrap().repositories[0].root,
@@ -226,7 +229,7 @@ fn reopening_current_root_updates_recency_without_erasing_another_clients_root()
     );
     app.handle(Action::RecentRepositories);
     app.handle(Action::SwitchBranch);
-    first.persist(&app.navigation).unwrap();
+    first.persist(app.navigation()).unwrap();
     let navigation = settings::load(&path).unwrap();
     assert_eq!(navigation.repositories.len(), 2);
     assert_eq!(
@@ -252,19 +255,19 @@ fn lock_contention_and_save_failure_leave_previous_snapshot_and_release_lock() {
     let (mut store, _) = Store::open(path.clone()).unwrap();
     let repo = TestRepo::new();
     let app = App::new(repo.open()).unwrap();
-    assert!(store.persist(&app.navigation).is_err());
+    assert!(store.persist(app.navigation()).is_err());
     assert_eq!(std::fs::read(&path).unwrap(), before);
     lock.unlock().unwrap();
     drop(lock);
     assert_eq!(
-        store.persist(&app.navigation).unwrap().repositories.len(),
+        store.persist(app.navigation()).unwrap().repositories.len(),
         1
     );
     std::fs::write(&path, "corrupted externally").unwrap();
     let mut changed = app;
-    changed.graph_visible = true;
+    changed.set_history_window(changed.history_limit(), true);
     changed.capture_navigation();
-    assert!(store.persist(&changed.navigation).is_err());
+    assert!(store.persist(changed.navigation()).is_err());
     assert_eq!(
         std::fs::read_to_string(&path).unwrap(),
         "corrupted externally"
@@ -280,10 +283,10 @@ fn non_utf8_paths_round_trip_and_saved_file_is_private() {
         .0
         .join(std::ffi::OsString::from_vec(b"odd-\xff\nroot".to_vec()));
     let repo = TestRepo::new();
-    let mut app = App::new(repo.open()).unwrap();
-    app.navigation.repositories[0].root = NativePath::new(&root);
+    let mut navigation = App::new(repo.open()).unwrap().into_navigation();
+    navigation.repositories[0].root = NativePath::new(&root);
     let path = directory.0.join("state.json");
-    settings::save(&path, &app.navigation).unwrap();
+    settings::save(&path, &navigation).unwrap();
     assert_eq!(
         settings::load(&path).unwrap().repositories[0]
             .root

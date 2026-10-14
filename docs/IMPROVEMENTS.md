@@ -14,6 +14,7 @@ possible defects have been found. No numeric change quota is used.
 | R4 | A worker panics; despite the recovery message a subsequent staging operation starts. | Block commands until successful refresh, retaining quit and viewport controls. Close obsolete prompts. | Injected worker panic; index remains unstaged until recovery succeeds. |
 | R5 | Cancel a slow commit after its Git directory becomes temporarily unavailable; reload fails, then unstage is still accepted. | Failed cancellation recovery also blocks commands until successful refresh. | `background`: unchanged HEAD, index and working file, stopped hook descendant, explicit refresh then successful unstage. |
 | R6 | Horizontal scrolling uses code-point count for wide CJK and combining marks. | Bound scrolling by rendered terminal cells using the same control escaping as rendering. | `horizontal_bounds_use_terminal_cells_for_wide_and_combining_characters`. |
+| R7 | Two files have identical untracked previews; scrolling during background navigation is applied to the other file. | Transfer busy viewport changes only when selected object identity also matches. | Deterministic worker-completion regression in `session`. |
 
 Selection identities retain native path bytes; Linux verifies a non-UTF8 path.
 Stash/reflog selection uses commit identity; identical repeated reflog entries
@@ -30,18 +31,22 @@ Existing mutation-specific stale-state checks remain necessary.
 - Transactional refresh deliberately retains a second app snapshot until success;
   this is a correctness cost, not a memory optimization.
 
-Measurements and environment are recorded in `performance-2026-10-14.json`.
-Run `cargo build --locked --release --example performance`, preserve the old probe
+Paired measurements and resource results are pending the final release builds;
+they will be recorded before this draft is merged.
+Build the baseline and changed revision with separate Cargo target directories
+using `cargo build --locked --release --example performance`, preserve the old probe
 binary, then `python3 scripts/measure.py OUTPUT_DIRECTORY OLD_PROBE_BINARY`.
-The script creates disposable, identical repositories: 20 commits/10 files,
-3000 commits/10 files, and 20 commits/3000 files. Files have both staged and
-unstaged content. History loads the default 100-commit window. Probes use one
+The script rejects identical executable hashes and records host load. It creates
+disposable, identical repositories: 20 commits/10 files,
+3000 commits/10 files, and 20 commits/3000 files, plus one large tracked file in each case. Normal
+files have both staged and unstaged content. Startup uses the default 20-commit
+window; refresh probes explicitly request up to 3000 commits. Probes use one
 warmup and 15 samples; p95 is the largest of these 15 samples, not a tight
 confidence estimate. Before/after run sequentially on each fixture, reversing
 order for the history case; host load can still affect results.
 
-Startup times `App::new` after locating the repository. Paging and search use
-30,000 synthetic Unicode lines. Session paging includes cloning the app. Cancel
+Startup times `App::new` after locating the repository. Paging and search use a real diff of a tracked Unicode file with 30,000
+changed lines (about 60,000 displayed diff lines). Session paging includes cloning the app. Cancel
 timing includes a deliberate 25 ms delay before cancellation of a sleeping
 helper; it is total operation time, not pure cancel-to-exit latency. On macOS
 `/usr/bin/time -l` records resource usage separately for each probe process.
@@ -53,6 +58,9 @@ Formatting, strict all-target/all-feature Clippy, the complete tests, and hosted
 Linux/macOS/Windows CI are required for publication. Existing acceptance covers
 palette text versus shortcuts, multiline paste, narrow terminals, long lists,
 search wrap, conflict recovery, inherited pipes and graceful/forced cancellation.
+The import terminal driver now waits for the completed refresh message rather than
+a header already present before the input; Unix step deadlines match the Windows
+20-second allowance for loaded hosts. Git-state assertions are unchanged.
 The new terminal regression covers external insertion, unchanged scrolling and
 independent Git index verification. Remote GitHub mutations were not repeated.
 

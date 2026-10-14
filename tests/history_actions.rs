@@ -23,15 +23,15 @@ fn history_loads_older_and_other_branch_commits_without_losing_selection() {
     repo.commit_all("topic");
     repo.git(&["switch", "main"]);
     let mut app = App::new(repo.open()).unwrap();
-    app.view = ViewMode::History;
-    assert_eq!(app.state.commits.len(), 20);
+    app.set_view(ViewMode::History);
+    assert_eq!(app.state().commits.len(), 20);
     app.handle(Action::LoadHistory);
-    assert_eq!(app.state.commits.len(), 26);
-    assert!(app.state.commits.iter().any(|c| c.subject == "topic"));
-    app.history_selection = 25;
+    assert_eq!(app.state().commits.len(), 26);
+    assert!(app.state().commits.iter().any(|c| c.subject == "topic"));
+    app.select(25);
     app.handle(Action::Refresh);
-    assert_eq!(app.history_selection, 25);
-    assert_eq!(app.state.commits[25].subject, "commit 0");
+    assert_eq!(app.history_selection(), 25);
+    assert_eq!(app.state().commits[25].subject, "commit 0");
 }
 
 #[test]
@@ -46,26 +46,38 @@ fn confirmed_cherry_pick_and_revert_make_commits_and_cancel_preserves_head() {
     repo.git(&["switch", "main"]);
     let before = repo.git(&["rev-parse", "HEAD"]);
     let mut app = App::new(repo.open()).unwrap();
-    app.view = ViewMode::History;
-    app.history_selection = app.state.commits.iter().position(|c| c.sha == sha).unwrap();
+    app.set_view(ViewMode::History);
+    app.select(
+        app.state()
+            .commits
+            .iter()
+            .position(|c| c.sha == sha)
+            .unwrap(),
+    );
     app.handle(Action::CherryPick);
     submit(&mut app, "wrong");
     submit(&mut app, "");
-    assert!(app.message_is_error);
+    assert!(app.message_is_error());
     assert_eq!(repo.git(&["rev-parse", "HEAD"]), before);
     app.handle(Action::CherryPick);
     submit(&mut app, &sha);
     submit(&mut app, "");
-    assert!(!app.message_is_error, "{}", app.message);
+    assert!(!app.message_is_error(), "{}", app.message());
     assert_eq!(
         std::fs::read_to_string(repo.path.join("topic")).unwrap(),
         "topic"
     );
-    app.history_selection = app.state.commits.iter().position(|c| c.sha == sha).unwrap();
+    app.select(
+        app.state()
+            .commits
+            .iter()
+            .position(|c| c.sha == sha)
+            .unwrap(),
+    );
     app.handle(Action::RevertCommit);
     submit(&mut app, &sha);
     submit(&mut app, "");
-    assert!(!app.message_is_error, "{}", app.message);
+    assert!(!app.message_is_error(), "{}", app.message());
     assert!(!repo.path.join("topic").exists());
     assert!(repo.git(&["log", "-1", "--format=%s"]).contains("Revert"));
 }
@@ -177,14 +189,14 @@ fn history_search_selects_matching_commits_and_wraps_without_writes() {
     repo.commit_all("needle latest");
     let before = repo.git(&["rev-parse", "HEAD"]);
     let mut app = App::new(repo.open()).unwrap();
-    app.view = ViewMode::History;
+    app.set_view(ViewMode::History);
     app.handle(Action::Search);
     submit(&mut app, "needle");
-    assert_eq!(app.history_selection, 0);
+    assert_eq!(app.history_selection(), 0);
     app.handle(Action::NextMatch);
-    assert_eq!(app.history_selection, 2);
+    assert_eq!(app.history_selection(), 2);
     app.handle(Action::NextMatch);
-    assert_eq!(app.history_selection, 0);
+    assert_eq!(app.history_selection(), 0);
     assert_eq!(repo.git(&["rev-parse", "HEAD"]), before);
 }
 
@@ -201,24 +213,26 @@ fn graph_shows_sibling_branches_and_merge_edges_with_selected_commit() {
     repo.commit_all("main");
     repo.git(&["merge", "--no-edit", "topic"]);
     let mut app = App::new(repo.open()).unwrap();
-    app.view = ViewMode::History;
+    app.set_view(ViewMode::History);
     app.handle(Action::ToggleGraph);
     assert!(
-        app.graph_visible && app.detail_text.contains("|\\") && app.detail_text.contains("topic")
+        app.graph_visible()
+            && app.detail_text().contains("|\\")
+            && app.detail_text().contains("topic")
     );
-    let sha = app.state.commits[0].sha.clone();
+    let sha = app.state().commits[0].sha.clone();
     assert!(
-        app.detail_text
+        app.detail_text()
             .lines()
             .any(|line| line.starts_with("> ") && line.contains(&sha))
     );
     app.handle(Action::NextItem);
-    let sha = &app.state.commits[1].sha;
+    let sha = &app.state().commits[1].sha;
     assert!(
-        app.detail_text
+        app.detail_text()
             .lines()
             .any(|line| line.starts_with("> ") && line.contains(sha))
     );
     app.handle(Action::ToggleGraph);
-    assert!(!app.graph_visible && app.detail_text.contains(&app.state.commits[1].subject));
+    assert!(!app.graph_visible() && app.detail_text().contains(&app.state().commits[1].subject));
 }

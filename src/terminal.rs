@@ -46,13 +46,19 @@ fn restore_terminal() {
     );
 }
 
-pub fn run(repository: Repository, state_path: Option<PathBuf>) -> Result<()> {
-    // Validate/load before touching the terminal; invalid repositories must not break the shell.
-    let mut session = Session::new(App::new(repository)?);
+/// Raw mode on a pipe would hang scripts, so interactive screens refuse to start without a TTY.
+pub(crate) fn require_tty() -> Result<()> {
     ensure!(
         io::stdin().is_terminal() && io::stdout().is_terminal(),
         "Interactive mode requires a terminal; use --headless for scripts"
     );
+    Ok(())
+}
+
+pub fn run(repository: Repository, state_path: Option<PathBuf>) -> Result<()> {
+    // Validate/load before touching the terminal; invalid repositories must not break the shell.
+    let mut session = Session::new(App::new(repository)?);
+    require_tty()?;
     let mut store = None;
     if let Some(path) = state_path {
         match git_wirdo::settings::Store::open(path.clone()) {
@@ -65,10 +71,9 @@ pub fn run(repository: Repository, state_path: Option<PathBuf>) -> Result<()> {
                     crossterm::event::KeyModifiers::NONE,
                 ));
             }
-            Err(error) => {
-                session.app.persistence_error =
-                    Some(format!("Saving disabled: {error:#} ({})", path.display()))
-            }
+            Err(error) => session
+                .app
+                .set_persistence_error(format!("Saving disabled: {error:#} ({})", path.display())),
         }
     }
     install_panic_hook();
@@ -83,20 +88,18 @@ pub fn run(repository: Repository, state_path: Option<PathBuf>) -> Result<()> {
         dirty |= session.busy();
         session.tick();
         if !session.busy()
-            && (last_save.elapsed() >= Duration::from_secs(1) || !session.app.running)
+            && (last_save.elapsed() >= Duration::from_secs(1) || !session.app.running())
         {
-            session.app.capture_navigation();
             if let Some(store) = &mut store {
-                let previous = session.app.persistence_error.take();
-                match store.persist(&session.app.navigation) {
-                    Ok(navigation) => session.app.navigation = navigation,
-                    Err(error) => session.app.persistence_error = Some(format!("{error:#}")),
-                }
-                dirty |= previous != session.app.persistence_error;
+                let previous = session.app.persistence_error().map(str::to_owned);
+                session.app.save_navigation(store);
+                dirty |= previous.as_deref() != session.app.persistence_error();
+            } else {
+                session.app.capture_navigation();
             }
             last_save = Instant::now();
         }
-        if !session.app.running {
+        if !session.app.running() {
             break;
         }
         if dirty {
@@ -115,7 +118,7 @@ pub fn run(repository: Repository, state_path: Option<PathBuf>) -> Result<()> {
     }
     drop(terminal);
     drop(_guard);
-    if let Some(error) = &session.app.persistence_error {
+    if let Some(error) = session.app.persistence_error() {
         eprintln!("UI settings: {error}");
     }
     Ok(())

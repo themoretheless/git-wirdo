@@ -35,6 +35,7 @@ fn main() {
         std::hint::black_box(App::new(repo.clone()).unwrap());
     });
     let mut app = App::new(repo.clone()).unwrap();
+    app.set_history_window(3000, false);
     measure("refresh", || app.refresh().unwrap());
     let control = Arc::new(Control::default());
     measure("background_refresh", || {
@@ -49,20 +50,33 @@ fn main() {
     });
     measure("open_diff", || {
         app.handle(Action::NextItem);
-        assert!(!app.message_is_error);
+        assert!(!app.message_is_error());
     });
-    app.detail_text = (0..30000).map(|n| format!("line {n} — текст\n")).collect();
+    let large = app
+        .displayed_files()
+        .iter()
+        .position(|f| f.path == Path::new("zz-large-detail"))
+        .unwrap();
+    app.select(large);
+    let rewind = |app: &mut App| {
+        while app.detail_scroll() > 0 {
+            app.handle(Action::PageUp);
+        }
+    };
     measure("page_down_100", || {
-        app.detail_scroll = 0;
+        rewind(&mut app);
         for _ in 0..100 {
             app.handle(Action::PageDown);
         }
     });
-    app.search = "line 29999".into();
+    app.handle(Action::Search);
+    app.handle_paste("pending line 29999");
+    app.handle_key(KeyEvent::new(KeyCode::Enter, KeyModifiers::NONE));
     measure("search", || {
-        app.detail_scroll = 0;
+        rewind(&mut app);
         app.handle(Action::NextMatch);
     });
+    rewind(&mut app);
     measure("session_scroll_100", || {
         let mut session = git_wirdo::session::Session::new(app.clone());
         for _ in 0..100 {
