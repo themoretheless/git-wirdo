@@ -1,5 +1,4 @@
 //! Terminal rendering of an `App` snapshot: header, list, detail pane, footer, palette.
-use crate::model::terminal_text as safe_text;
 use ratatui::Frame;
 use ratatui::layout::{Constraint, Direction, Layout, Rect};
 use ratatui::style::{Color, Style};
@@ -516,6 +515,19 @@ fn list_items(app: &App) -> (Vec<ListItem<'static>>, bool) {
             true,
         )
     }
+}
+
+/// Escape terminal control sequences without changing ordinary Unicode text.
+pub(crate) fn safe_text(text: &str) -> String {
+    let mut result = String::with_capacity(text.len());
+    for character in text.chars() {
+        if character.is_control() && !matches!(character, '\n' | '\t') {
+            result.extend(character.escape_default());
+        } else {
+            result.push(character);
+        }
+    }
+    result
 }
 
 #[cfg(test)]

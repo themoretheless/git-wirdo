@@ -6,6 +6,8 @@ mod access;
 mod actions;
 mod detail;
 pub(crate) mod editors;
+#[cfg(test)]
+mod github_tests;
 mod keys;
 mod prompts;
 mod selection;
@@ -93,15 +95,36 @@ impl App {
         if self.view == ViewMode::RecentRepositories {
             return;
         }
-        let mut navigation = std::mem::take(&mut self.navigation);
-        navigation.remember(self, false);
-        self.navigation = navigation;
+        let current = self.repository_settings();
+        self.navigation.remember(current, false);
     }
 
     pub fn restore_navigation(&mut self, mut navigation: crate::settings::Navigation) {
-        navigation.restore(self);
-        navigation.remember(self, true);
+        self.apply_saved(&navigation);
+        navigation.remember(self.repository_settings(), true);
         self.navigation = navigation;
+    }
+
+    /// What this client shows for its working tree, in the persisted form.
+    fn repository_settings(&self) -> crate::settings::RepositorySettings {
+        crate::settings::RepositorySettings::capture(
+            self.repository.root(),
+            self.view,
+            self.history_limit,
+            self.graph_visible,
+            &self.pr_filter,
+        )
+    }
+
+    /// Reopen the working tree where the user left it, if it was opened before.
+    fn apply_saved(&mut self, navigation: &crate::settings::Navigation) {
+        if let Some(saved) = navigation.saved(self.repository.root()) {
+            self.view = saved.view;
+            self.history_limit = saved.history_limit;
+            self.graph_visible = saved.graph_visible;
+            self.pr_filter = saved.pr_filter.clone();
+            self.detail_text.clear();
+        }
     }
 
     pub fn new(repository: Repository) -> Result<Self> {
@@ -162,9 +185,8 @@ impl App {
         };
         app.tracking = app.load_tracking();
         app.refresh_detail();
-        let mut navigation = std::mem::take(&mut app.navigation);
-        navigation.remember(&app, true);
-        app.navigation = navigation;
+        let current = app.repository_settings();
+        app.navigation.remember(current, true);
         Ok(app)
     }
 
@@ -473,9 +495,9 @@ impl App {
         // Construct first: a failed open leaves the existing repository intact.
         let mut replacement = Self::new(Repository::open_with(path, self.repository.runner())?)?;
         let mut navigation = self.navigation.clone();
-        navigation.remember(self, false);
-        navigation.restore(&mut replacement);
-        navigation.remember(&replacement, true);
+        navigation.remember(self.repository_settings(), false);
+        replacement.apply_saved(&navigation);
+        navigation.remember(replacement.repository_settings(), true);
         replacement.navigation = navigation;
         replacement.persistence_error = self.persistence_error.clone();
         replacement.handle(Action::Refresh);
