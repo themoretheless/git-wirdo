@@ -8,7 +8,7 @@ use std::{
     sync::atomic::{AtomicU64, Ordering},
 };
 
-use crate::{app::App, github::PrFilter, model::ViewMode};
+use crate::{github::PrFilter, model::ViewMode};
 
 const MAX_BYTES: u64 = 1024 * 1024;
 static NEXT_FILE: AtomicU64 = AtomicU64::new(0);
@@ -103,20 +103,27 @@ pub struct RepositorySettings {
     pub pr_filter: PrFilter,
 }
 impl RepositorySettings {
-    fn capture(app: &App) -> Self {
+    /// What a front end shows for the working tree at `root`, normalised for saving.
+    pub fn capture(
+        root: &Path,
+        view: ViewMode,
+        history_limit: usize,
+        graph_visible: bool,
+        pr_filter: &PrFilter,
+    ) -> Self {
         Self {
-            root: NativePath::new(app.repository.root()),
+            root: NativePath::new(root),
             last_opened: 0,
             // These views need a fresh selected file/PR, never revive an old target.
-            view: match app.view {
+            view: match view {
                 ViewMode::Hunks | ViewMode::PrFiles => ViewMode::Files,
                 view => view,
             },
-            history_limit: app.history_limit.clamp(20, 10_000),
-            graph_visible: app.graph_visible,
+            history_limit: history_limit.clamp(20, 10_000),
+            graph_visible,
             pr_filter: PrFilter {
-                limit: app.pr_filter.limit.clamp(1, 10_000),
-                ..app.pr_filter.clone()
+                limit: pr_filter.limit.clamp(1, 10_000),
+                ..pr_filter.clone()
             },
         }
     }
@@ -136,15 +143,16 @@ impl Default for Navigation {
     }
 }
 impl Navigation {
-    pub fn remember(&mut self, app: &App, opened: bool) {
-        let mut settings = RepositorySettings::capture(app);
+    /// Record `settings` for its working tree; `opened` moves it to the front of the recent list.
+    pub fn remember(&mut self, mut settings: RepositorySettings, opened: bool) {
+        let browsing_recent = settings.view == ViewMode::RecentRepositories;
         if let Some(index) = self
             .repositories
             .iter()
             .position(|s| s.root == settings.root)
         {
             settings.last_opened = self.repositories[index].last_opened;
-            if app.view == ViewMode::RecentRepositories {
+            if browsing_recent {
                 settings = self.repositories[index].clone();
             }
             if !opened {
@@ -157,15 +165,10 @@ impl Navigation {
         self.repositories.insert(0, settings);
         self.repositories.truncate(50);
     }
-    pub fn restore(&self, app: &mut App) {
-        let root = NativePath::new(app.repository.root());
-        if let Some(settings) = self.repositories.iter().find(|s| s.root == root) {
-            app.view = settings.view;
-            app.history_limit = settings.history_limit;
-            app.graph_visible = settings.graph_visible;
-            app.pr_filter = settings.pr_filter.clone();
-            app.detail_text.clear();
-        }
+    /// The saved settings for the working tree at `root`, if it was opened before.
+    pub fn saved(&self, root: &Path) -> Option<&RepositorySettings> {
+        let root = NativePath::new(root);
+        self.repositories.iter().find(|s| s.root == root)
     }
     fn validate(&self) -> Result<()> {
         ensure!(
@@ -355,8 +358,13 @@ mod tests {
 
     #[test]
     fn guard_releases_lock_even_while_a_duplicate_descriptor_is_alive() {
-        let directory = crate::test_support::TempDirectory::new();
-        let path = directory.0.join("lock");
+        let directory = std::env::temp_dir().join(format!(
+            "git-wirdo-core-lock-{}-{}",
+            std::process::id(),
+            NEXT_FILE.fetch_add(1, Ordering::Relaxed)
+        ));
+        fs::create_dir_all(&directory).unwrap();
+        let path = directory.join("lock");
         let file = OpenOptions::new()
             .read(true)
             .write(true)
@@ -374,5 +382,7 @@ mod tests {
         next.try_lock().unwrap();
         next.unlock().unwrap();
         drop(duplicate);
+        drop(next);
+        fs::remove_dir_all(directory).unwrap();
     }
 }

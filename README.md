@@ -176,10 +176,22 @@ Background tasks keep the terminal responsive while Git runs.
 
 ## Code layout
 
-- `src/patch.rs` — exact-byte hunk separation for selective staging
-- `src/git/` — repository discovery and the `GitRunner` seam (`mod.rs`), with Git operations
+The repository is a Cargo workspace with two crates.
+
+**`crates/core` (`git-wirdo-core`)** is the library. It has no terminal or GUI dependency,
+so any front end can drive it:
+
+- `git/` — repository discovery and the `GitRunner` seam (`mod.rs`), with Git operations
   split by domain: worktrees, working-tree files, history, branches, stashes, tags, remotes
-- `src/model.rs` — repository data and display-safe path labels
+- `model.rs` — repository data and display-safe path labels
+- `patch.rs` — exact-byte hunk separation for selective staging
+- `github.rs`, `pr_review.rs` — GitHub CLI transport, PR lifecycle, and inline review
+- `process.rs` — cancellable child processes with progress
+- `settings.rs` — persisted navigation state with locked, atomic merges
+
+**The root crate (`git-wirdo`)** is the terminal client built on that library; it
+re-exports the core modules, so `git_wirdo::git` keeps working:
+
 - `src/app/mod.rs` — application state, selections, refresh, and error handling
 - `src/app/access.rs` — the public read accessors and named commands; fields stay crate-private
 - `src/app/actions.rs` — action dispatch: the current view claims an action first, then global ones
@@ -187,13 +199,13 @@ Background tasks keep the terminal responsive while Git runs.
 - `src/app/prompts/` — multi-field forms grouped by domain, typed confirmations, one reload per submission
 - `src/app/detail.rs` — detail pane contents and in-pane search
 - `src/commands.rs` — searchable command palette entries per view
-- `src/github.rs`, `src/pr_review.rs` — GitHub CLI transport, PR lifecycle, and inline review
-- `src/process.rs`, `src/session.rs` — cancellable background tasks and the serialized worker
-- `src/settings.rs` — persisted navigation state with locked, atomic merges
+- `src/session.rs` — the serialized background worker
 - `src/input.rs` — terminal key events mapped to application actions
-- `src/ui.rs` — Ratatui rendering and list scroll state
+- `src/ui.rs` — Ratatui rendering, terminal-safe escaping, and list scroll state
 - `src/terminal.rs` — terminal lifecycle and event loop
 - `src/main.rs` — CLI and headless output
+
+`cargo test` and `cargo clippy` at the root cover both crates.
 
 ## Development
 
