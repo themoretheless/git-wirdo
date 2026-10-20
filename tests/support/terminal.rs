@@ -260,6 +260,9 @@ impl TerminalFixture {
         loop {
             self.drain();
             if let Some(status) = self.child.try_wait().unwrap() {
+                // The child can write its final LeaveAlternateScreen between the
+                // preceding drain and try_wait. Reap first, then consume those bytes.
+                self.drain();
                 assert!(status.success(), "TUI failed: {}", self.screen());
                 break;
             }
