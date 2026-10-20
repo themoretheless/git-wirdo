@@ -462,7 +462,19 @@ fn list_items(app: &App) -> (Vec<ListItem<'static>>, bool) {
             app.reflog
                 .items
                 .iter()
-                .map(|e| format!("{} {} {}", e.selector, e.sha, e.subject))
+                .map(|e| {
+                    let label = if e.selector.starts_with("refs/git-wirdo/recovery/") {
+                        "recovery"
+                    } else {
+                        &e.selector
+                    };
+                    format!(
+                        "{} {} {}",
+                        label,
+                        e.sha.get(..12).unwrap_or(&e.sha),
+                        e.subject
+                    )
+                })
                 .collect(),
             "No reflog entries",
         ),

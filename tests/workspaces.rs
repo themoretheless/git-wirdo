@@ -390,3 +390,116 @@ fn lock_unlock_and_move_preserve_dirty_files_and_index_and_reject_stale_requests
     );
     assert!(repository.move_worktree(&request, &path).is_err());
 }
+
+#[test]
+fn removing_a_detached_worktree_retains_its_unique_head_in_recovery_refs() {
+    let repo = TestRepo::new();
+    repo.write("file", "base\n");
+    repo.commit_all("base");
+    let base = repo.git(&["rev-parse", "HEAD"]);
+    let path = repo.directory.0.join("detached");
+    repo.git(&[
+        "worktree",
+        "add",
+        "--detach",
+        path.to_str().unwrap(),
+        "HEAD",
+    ]);
+    std::fs::write(path.join("file"), "unique detached work\n").unwrap();
+    support::git(&path, &["add", "file"]);
+    support::git(&path, &["commit", "-m", "unique detached commit"]);
+    let head = support::git(&path, &["rev-parse", "HEAD"]);
+    assert!(
+        repo.git(&[
+            "for-each-ref",
+            "--contains",
+            head.trim(),
+            "--format=%(refname)"
+        ])
+        .trim()
+        .is_empty()
+    );
+    let repository = repo.open();
+    let selected = repository
+        .workspaces()
+        .unwrap()
+        .into_iter()
+        .find(|w| w.path.canonicalize().unwrap() == path.canonicalize().unwrap())
+        .unwrap();
+    repository.remove_workspace(&selected).unwrap();
+    assert!(!path.exists());
+    assert_eq!(repo.git(&["rev-parse", "HEAD"]), base);
+    let retained = repo.git(&[
+        "for-each-ref",
+        "--contains",
+        head.trim(),
+        "--format=%(refname)",
+        "refs/git-wirdo/recovery/",
+    ]);
+    assert!(
+        !retained.trim().is_empty(),
+        "unique detached HEAD lost its last reference"
+    );
+    // Expiring reflogs and pruning unreachable objects must still retain this commit.
+    repo.git(&["reflog", "expire", "--expire=now", "--all"]);
+    repo.git(&["gc", "--prune=now"]);
+    assert_eq!(
+        repo.git(&["show", &format!("{}:file", head.trim())]),
+        "unique detached work\n"
+    );
+}
+
+#[derive(Debug)]
+struct RefWriteFailure(std::io::ErrorKind);
+impl git_wirdo::git::GitRunner for RefWriteFailure {
+    fn output(
+        &self,
+        command: &mut std::process::Command,
+        input: Option<&[u8]>,
+    ) -> anyhow::Result<std::process::Output> {
+        if command.get_args().any(|arg| arg == "update-ref") {
+            return Err(std::io::Error::new(self.0, "injected recovery ref failure").into());
+        }
+        git_wirdo::git::GitRunner::output(&git_wirdo::git::ProcessRunner, command, input)
+    }
+}
+
+#[test]
+fn recovery_ref_permission_or_storage_failure_keeps_the_detached_checkout() {
+    for kind in [
+        std::io::ErrorKind::PermissionDenied,
+        std::io::ErrorKind::StorageFull,
+    ] {
+        let repo = TestRepo::new();
+        repo.write("file", "base\n");
+        repo.commit_all("base");
+        let path = repo.directory.0.join("detached");
+        repo.git(&[
+            "worktree",
+            "add",
+            "--detach",
+            path.to_str().unwrap(),
+            "HEAD",
+        ]);
+        let repository = git_wirdo::git::Repository::open_with(
+            &repo.path,
+            std::sync::Arc::new(RefWriteFailure(kind)),
+        )
+        .unwrap();
+        let selected = repository
+            .workspaces()
+            .unwrap()
+            .into_iter()
+            .find(|w| w.branch == "detached")
+            .unwrap();
+        let head = support::git(&path, &["rev-parse", "HEAD"]);
+        assert!(repository.remove_workspace(&selected).is_err());
+        assert!(path.join(".git").is_file());
+        assert_eq!(support::git(&path, &["rev-parse", "HEAD"]), head);
+        assert_eq!(support::git(&path, &["show", ":file"]), "base\n");
+        assert_eq!(
+            std::fs::read_to_string(path.join("file")).unwrap(),
+            "base\n"
+        );
+    }
+}

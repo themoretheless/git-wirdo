@@ -991,3 +991,42 @@ fn visual_reword_drop_and_edit_stop_through_terminal() {
     );
     terminal.quit();
 }
+
+#[test]
+fn detached_worktree_removal_has_visible_recovery_through_terminal() {
+    let repo = TestRepo::new();
+    repo.write("file", "base");
+    repo.commit_all("base");
+    let path = repo.directory.0.join("detached checkout");
+    repo.git(&[
+        "worktree",
+        "add",
+        "--detach",
+        path.to_str().unwrap(),
+        "HEAD",
+    ]);
+    support::git(&path, &["commit", "--allow-empty", "-m", "detached unique"]);
+    let head = support::git(&path, &["rev-parse", "HEAD"]);
+    let mut terminal = tui(&repo);
+    terminal.view("Worktrees");
+    terminal.key(b"j", "Branch: detached");
+    terminal.key(b"D", "Type remove to confirm:");
+    terminal.field("remove", "detached HEAD saved in Reflog recovery refs");
+    assert!(!path.exists());
+    assert!(
+        !repo
+            .git(&[
+                "for-each-ref",
+                "--contains",
+                head.trim(),
+                "--format=%(refname)",
+                "refs/git-wirdo/recovery/"
+            ])
+            .trim()
+            .is_empty()
+    );
+    terminal.key(b":", "Commands:");
+    terminal.field("View reflog", "View: Reflog");
+    terminal.expect("detached unique");
+    terminal.quit();
+}

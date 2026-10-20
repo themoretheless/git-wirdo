@@ -79,7 +79,11 @@ impl RepositoryPrompt {
             Self::RemoveWorktree(workspace) => {
                 ensure!(v[0] == "remove", "Removal cancelled: type remove exactly");
                 app.repository.remove_prepared_worktree(&workspace)?;
-                return Ok("Worktree removed; branch retained".into());
+                return Ok(if workspace.is_detached() {
+                    "Worktree removed; detached HEAD saved in Reflog recovery refs".into()
+                } else {
+                    "Worktree removed; branch retained".into()
+                });
             }
         };
         app.open_repository(&opened)?;
