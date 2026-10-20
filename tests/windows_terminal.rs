@@ -237,6 +237,17 @@ fn native_windows_terminal_opens_worktrees_and_generic_local_clone() {
     terminal.key(b"N", "Worktree path (relative to repo or absolute):");
     terminal.field(workspace.to_str().unwrap(), "New branch name:");
     terminal.field("native-worktree", "Worktree created");
+    terminal.key(b"j", "Branch: native-worktree");
+    terminal.key(b":", "Commands:");
+    terminal.field("Lock selected worktree", "Lock reason:");
+    terminal.field("retain offline", "Worktree locked");
+    assert!(
+        support::git(&cloned, &["worktree", "list", "--porcelain"])
+            .contains("locked retain offline")
+    );
+    terminal.key(b":", "Commands:");
+    terminal.field("Unlock selected worktree", "Type unlock to confirm:");
+    terminal.field("unlock", "Worktree unlocked");
     terminal.key(b"O", "Repository path:");
     terminal.field(workspace.to_str().unwrap(), "Opened repository");
     assert_eq!(

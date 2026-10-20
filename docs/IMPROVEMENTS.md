@@ -216,3 +216,20 @@ cross-platform filesystem races. Existing injected stash failures, cancellation,
 panic recovery, stale index/HEAD, snapshot refresh and terminal tests remain
 required gates. Feature delivery follows reliability gates: worktree branch/base
 selection and lock/move, then rebase reword/edit/drop and conflict-view design.
+
+
+## Worktree management follow-up — 2026-10-21
+
+| ID | Previous gap | Change | Evidence |
+| --- | --- | --- | --- |
+| W1 | Creation always made a new branch at HEAD. | Palette forms create at an explicit resolved commit/ref or check out an existing local branch. No force checkout. | Real Git tests inspect both HEADs, source index/files, occupied branch refusal and invalid-base refusal; Unix PTY drives both forms. |
+| W2 | An occupied branch failed checkout without showing its location. | Branch details show the linked checkout path. | Worktree branch detail regression. |
+| W3 | Worktree locks required a separate terminal. | Palette lock with reason and typed unlock confirmation, revalidating selected path/branch/lock state. | Git porcelain oracle, stale-lock refusal, Unix PTY and native Windows ConPTY flow. |
+| W4 | Moving a linked checkout required a separate terminal. | Palette destination form and checked target snapshot, normal Git move without force. | Independent staged/unstaged/untracked content and Git registration checks; stale move refusal; real Unix PTY. |
+
+Current/primary/locked trees cannot be moved. Moving the active checkout is not
+supported. Old recent-root settings are retained at the old path until explicitly
+forgotten; navigation can open the destination and save its own settings. Native
+Git controls submodule and destination restrictions. No new shortcut or configuration
+format is added. Lock reasons are stored by Git; the current compact model displays
+lock state but not the reason. No performance improvement is claimed.

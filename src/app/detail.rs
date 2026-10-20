@@ -65,14 +65,20 @@ impl App {
                 Some(commit) => self.repository.commit_detail(&commit.sha),
                 None => Ok("No commit selected".to_owned()),
             },
-            ViewMode::Branches => Ok(match self.state.branches.get(self.branch_selection) {
-                Some(branch) if branch.current => format!("Current branch: {}", branch.name),
-                Some(branch) => format!(
-                    "Branch: {}\n\nPress Enter to switch to this branch.",
-                    branch.name
-                ),
-                None => "No branch selected".to_owned(),
-            }),
+            ViewMode::Branches => match self.state.branches.get(self.branch_selection) {
+                Some(branch) => {
+                    let occupied = self.repository.workspaces()?.into_iter()
+                        .find(|workspace| workspace.branch == branch.name);
+                    Ok(if branch.current {
+                        format!("Current branch: {}\nWorktree: {}", branch.name, display_path(self.repository.root()))
+                    } else if let Some(workspace) = occupied {
+                        format!("Branch: {}\nChecked out in: {}\nOpen this checkout through Worktrees.", branch.name, display_path(&workspace.path))
+                    } else {
+                        format!("Branch: {}\n\nPress Enter to switch to this branch.", branch.name)
+                    })
+                }
+                None => Ok("No branch selected".to_owned()),
+            },
             ViewMode::Conflicts => {
                 let header = self.state.merge_state.summary();
                 let help =
