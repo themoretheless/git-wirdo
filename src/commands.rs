@@ -78,6 +78,11 @@ pub fn filtered(view: ViewMode, query: &str) -> Vec<Entry> {
         ],
         ViewMode::Worktrees => &[
             ("Create worktree", New),
+            ("Create worktree from commit or ref", WorktreeFrom),
+            ("Create worktree for existing branch", WorktreeExisting),
+            ("Lock selected worktree", LockWorktree),
+            ("Unlock selected worktree", UnlockWorktree),
+            ("Move selected worktree", MoveWorktree),
             ("Open selected worktree", SwitchBranch),
             ("Remove selected worktree", Remove),
         ],

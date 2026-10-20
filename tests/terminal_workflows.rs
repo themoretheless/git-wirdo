@@ -896,3 +896,49 @@ fn visual_rebase_reorder_and_preview_through_terminal() {
     assert_eq!(repo.git(&["rev-list", "--count", "HEAD"]).trim(), "2");
     terminal.quit();
 }
+
+#[test]
+fn worktree_palette_creates_from_branch_and_base_and_moves_dirty_checkout() {
+    let repo = TestRepo::new();
+    repo.write("file", "base\n");
+    repo.commit_all("base");
+    let base = repo.git(&["rev-parse", "HEAD"]);
+    repo.git(&["branch", "existing"]);
+    let path = repo.directory.0.join("existing ü");
+    let moved = repo.directory.0.join("moved ü");
+    let from = repo.directory.0.join("from-base");
+    let mut terminal = tui(&repo);
+    terminal.view("Worktrees");
+    terminal.key(b":", "Commands:");
+    terminal.field("Create worktree for existing branch", "Worktree path:");
+    terminal.field(path.to_str().unwrap(), "Existing local branch name:");
+    terminal.field("existing", "Worktree created for existing branch");
+    terminal.key(b"j", "Branch: existing");
+    terminal.key(b":", "Commands:");
+    terminal.field("Lock selected worktree", "Lock reason:");
+    terminal.field("retain offline", "Worktree locked");
+    assert!(
+        repo.git(&["worktree", "list", "--porcelain"])
+            .contains("locked retain offline")
+    );
+    terminal.key(b":", "Commands:");
+    terminal.field("Unlock selected worktree", "Type unlock to confirm:");
+    terminal.field("unlock", "Worktree unlocked");
+    std::fs::write(path.join("notes"), "retain untracked\n").unwrap();
+    terminal.key(b":", "Commands:");
+    terminal.field("Move selected worktree", "New worktree path:");
+    terminal.field(moved.to_str().unwrap(), "Worktree moved");
+    assert!(!path.exists());
+    assert_eq!(
+        std::fs::read_to_string(moved.join("notes")).unwrap(),
+        "retain untracked\n"
+    );
+    assert_eq!(support::git(&moved, &["show", ":file"]), "base\n");
+    terminal.key(b":", "Commands:");
+    terminal.field("Create worktree from commit or ref", "Worktree path:");
+    terminal.field(from.to_str().unwrap(), "New branch name:");
+    terminal.field("from-base", "Base commit or ref:");
+    terminal.field(base.trim(), "Worktree created from selected base");
+    assert_eq!(support::git(&from, &["rev-parse", "HEAD"]), base);
+    terminal.quit();
+}

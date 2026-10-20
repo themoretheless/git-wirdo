@@ -13,6 +13,11 @@ use crate::model::{ViewMode, display_path};
 /// UI-independent commands; terminal key bindings live in `input`.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Action {
+    WorktreeFrom,
+    WorktreeExisting,
+    LockWorktree,
+    UnlockWorktree,
+    MoveWorktree,
     EditLines,
     RawInteractiveRebase,
     ToggleFileSelection,
@@ -91,7 +96,11 @@ impl Action {
     /// the terminal thread; everything that touches Git or GitHub runs in the worker.
     pub fn runs_locally(self, view: ViewMode) -> bool {
         match self {
-            Self::EditLines
+            Self::WorktreeFrom
+            | Self::WorktreeExisting
+            | Self::LockWorktree
+            | Self::UnlockWorktree
+            | Self::EditLines
             | Self::ToggleFileSelection
             | Self::FilterList
             | Self::StageLines
@@ -732,6 +741,38 @@ impl App {
             }
             Action::OpenRepository => {
                 self.start_prompt(RepositoryPrompt::Open, vec!["Repository path"])
+            }
+            Action::WorktreeFrom if self.view == ViewMode::Worktrees => self.start_prompt(
+                RepositoryPrompt::CreateWorktreeFrom,
+                vec!["Worktree path", "New branch name", "Base commit or ref"],
+            ),
+            Action::WorktreeExisting if self.view == ViewMode::Worktrees => self.start_prompt(
+                RepositoryPrompt::CreateWorktreeExisting,
+                vec!["Worktree path", "Existing local branch name"],
+            ),
+            Action::LockWorktree | Action::UnlockWorktree if self.view == ViewMode::Worktrees => {
+                if let Some(workspace) = self.workspaces.selected().cloned() {
+                    if action == Action::LockWorktree {
+                        self.start_prompt(
+                            RepositoryPrompt::LockWorktree(workspace),
+                            vec!["Lock reason"],
+                        );
+                    } else {
+                        self.start_prompt(
+                            RepositoryPrompt::UnlockWorktree(workspace),
+                            vec!["Type unlock to confirm"],
+                        );
+                    }
+                }
+            }
+            Action::MoveWorktree if self.view == ViewMode::Worktrees => {
+                if let Some(workspace) = self.workspaces.selected() {
+                    let request = self.repository.prepare_worktree_removal(workspace)?;
+                    self.start_prompt(
+                        RepositoryPrompt::MoveWorktree(request),
+                        vec!["New worktree path"],
+                    );
+                }
             }
             Action::New if self.view == ViewMode::Worktrees => self.start_prompt(
                 RepositoryPrompt::CreateWorktree,

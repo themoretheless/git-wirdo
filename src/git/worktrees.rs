@@ -55,6 +55,92 @@ impl Repository {
         Ok(())
     }
 
+    /// Create a new branch at a resolved commit, keeping the original HEAD unchanged.
+    pub fn create_worktree_from(&self, path: &Path, branch: &str, base: &str) -> Result<()> {
+        self.git(["check-ref-format", "--branch", branch])?;
+        let commit = self.text(&[
+            "rev-parse",
+            "--verify",
+            "--end-of-options",
+            &format!("{base}^{{commit}}"),
+        ])?;
+        self.git([
+            OsString::from("worktree"),
+            OsString::from("add"),
+            OsString::from("-b"),
+            OsString::from(branch),
+            OsString::from("--"),
+            self.resolve(path).into_os_string(),
+            OsString::from(commit.trim()),
+        ])?;
+        Ok(())
+    }
+
+    /// Git rejects a branch already checked out elsewhere; never overrides that guard.
+    pub fn create_worktree_existing(&self, path: &Path, branch: &str) -> Result<()> {
+        self.git(["check-ref-format", "--branch", branch])?;
+        self.git(["show-ref", "--verify", &format!("refs/heads/{branch}")])?;
+        self.git([
+            OsString::from("worktree"),
+            OsString::from("add"),
+            OsString::from("--"),
+            self.resolve(path).into_os_string(),
+            OsString::from(branch),
+        ])?;
+        Ok(())
+    }
+
+    fn verify_workspace(&self, workspace: &crate::model::Workspace) -> Result<()> {
+        ensure!(
+            self.workspaces()?.iter().any(|entry| entry == workspace),
+            "Worktree changed; refresh before continuing"
+        );
+        Ok(())
+    }
+
+    pub fn set_worktree_lock(
+        &self,
+        workspace: &crate::model::Workspace,
+        locked: bool,
+        reason: &str,
+    ) -> Result<()> {
+        self.verify_workspace(workspace)?;
+        ensure!(!workspace.bare, "Bare repository cannot be locked");
+        ensure!(
+            workspace.locked != locked,
+            "Worktree lock state already changed; refresh"
+        );
+        let mut args = vec![OsString::from("worktree")];
+        if locked {
+            args.extend([
+                OsString::from("lock"),
+                OsString::from("--reason"),
+                OsString::from(reason),
+            ]);
+        } else {
+            args.push(OsString::from("unlock"));
+        }
+        args.extend([OsString::from("--"), workspace.path.as_os_str().to_owned()]);
+        self.git(args)?;
+        Ok(())
+    }
+
+    /// Move a linked checkout with its files intact. Active and primary checkouts stay put.
+    pub fn move_worktree(&self, request: &WorktreeRemoval, destination: &Path) -> Result<()> {
+        ensure!(
+            self.prepare_worktree_removal(&request.workspace)? == *request,
+            "Worktree HEAD or identity changed; refresh and confirm the move again"
+        );
+        self.git([
+            OsString::from("worktree"),
+            OsString::from("move"),
+            OsString::from("--"),
+            request.workspace.path.as_os_str().to_owned(),
+            self.resolve(destination).into_os_string(),
+        ])?;
+        Ok(())
+    }
+
     pub fn prepare_worktree_removal(
         &self,
         workspace: &crate::model::Workspace,

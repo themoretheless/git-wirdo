@@ -294,6 +294,16 @@ removal. Confirmation captures the branch, HEAD and Git directory and rejects
 changed targets before removal. Branches are
 retained, including their unique commits; removal never uses force.
 
+The command palette in Worktrees also offers **Create worktree for existing
+branch**, **Create worktree from commit or ref**, **Lock selected worktree**,
+**Unlock selected worktree**, and **Move selected worktree**. Creating for an
+existing branch never forces a branch already checked out elsewhere. Explicit
+bases resolve to a commit before creation. Moving preserves staged, unstaged and
+untracked files; current, primary and locked trees cannot be moved. Removal and
+move confirmations reject stale target identities. Old recent paths remain in
+Recents until forgotten; open a moved tree at its new path. Branch details show
+the path of an already checked-out branch. Existing shortcuts are unchanged.
+
 `I` opens RecentRepositories: up to 50 recently opened repository/worktree roots,
 most recent first. Enter opens the selected root, retaining unsaved work in both
 checkouts. `D` forgets an entry without removing files or Git worktrees. Missing

@@ -266,3 +266,113 @@ fn unfinished_operation_is_not_discarded_with_a_clean_worktree() {
     );
     assert!(path.join("file").exists());
 }
+
+#[test]
+fn worktrees_use_existing_branches_and_explicit_bases_without_changing_current_files() {
+    let repo = TestRepo::new();
+    repo.write("file", "base\n");
+    repo.commit_all("base");
+    let base = repo.git(&["rev-parse", "HEAD"]);
+    repo.git(&["branch", "existing"]);
+    repo.write("file", "later\n");
+    repo.commit_all("later");
+    repo.write("file", "unstaged original\n");
+    let before_index = repo.git(&["ls-files", "--stage"]);
+    let repository = repo.open();
+    let existing = repo.directory.0.join("existing ü");
+    repository
+        .create_worktree_existing(&existing, "existing")
+        .unwrap();
+    let from = repo.directory.0.join("from base");
+    repository
+        .create_worktree_from(&from, "from-base", base.trim())
+        .unwrap();
+    assert_eq!(support::git(&existing, &["rev-parse", "HEAD"]), base);
+    assert_eq!(support::git(&from, &["rev-parse", "HEAD"]), base);
+    assert_eq!(repo.git(&["ls-files", "--stage"]), before_index);
+    assert_eq!(
+        std::fs::read_to_string(repo.path.join("file")).unwrap(),
+        "unstaged original\n"
+    );
+    let occupied = repo.directory.0.join("occupied");
+    assert!(
+        repository
+            .create_worktree_existing(&occupied, "existing")
+            .is_err()
+    );
+    assert!(!occupied.exists());
+    assert!(
+        repository
+            .create_worktree_existing(&occupied, "does-not-exist")
+            .is_err()
+    );
+    assert!(
+        repository
+            .create_worktree_from(&occupied, "invalid-base", "--help")
+            .is_err()
+    );
+    assert!(
+        repo.git(&["branch", "--list", "invalid-base"])
+            .trim()
+            .is_empty()
+    );
+    let mut app = App::new(repository).unwrap();
+    app.set_view(ViewMode::Branches);
+    app.select(
+        app.state()
+            .branches
+            .iter()
+            .position(|b| b.name == "existing")
+            .unwrap(),
+    );
+    assert!(app.detail_text().contains("Checked out in:"));
+    assert!(app.detail_text().contains("existing ü"));
+}
+
+#[test]
+fn lock_unlock_and_move_preserve_dirty_files_and_index_and_reject_stale_requests() {
+    let repo = TestRepo::new();
+    repo.write("file", "base\n");
+    repo.commit_all("base");
+    let path = repo.directory.0.join("review");
+    let moved = repo.directory.0.join("moved ü");
+    let repository = repo.open();
+    repository.create_workspace(&path, "topic").unwrap();
+    let entry = || {
+        repository
+            .workspaces()
+            .unwrap()
+            .into_iter()
+            .find(|w| w.branch == "topic")
+            .unwrap()
+    };
+    let selected = entry();
+    let request = repository.prepare_worktree_removal(&selected).unwrap();
+    repository
+        .set_worktree_lock(&selected, true, "retain while offline")
+        .unwrap();
+    assert!(entry().locked);
+    assert!(repository.move_worktree(&request, &moved).is_err());
+    assert!(repository.set_worktree_lock(&selected, false, "").is_err());
+    repository.set_worktree_lock(&entry(), false, "").unwrap();
+    std::fs::write(path.join("file"), "staged\n").unwrap();
+    support::git(&path, &["add", "file"]);
+    std::fs::write(path.join("file"), "unstaged\n").unwrap();
+    std::fs::write(path.join("notes"), "untracked\n").unwrap();
+    repository.move_worktree(&request, &moved).unwrap();
+    assert!(!path.exists());
+    assert_eq!(support::git(&moved, &["show", ":file"]), "staged\n");
+    assert_eq!(
+        std::fs::read_to_string(moved.join("file")).unwrap(),
+        "unstaged\n"
+    );
+    assert_eq!(
+        std::fs::read_to_string(moved.join("notes")).unwrap(),
+        "untracked\n"
+    );
+    assert_eq!(
+        entry().path.canonicalize().unwrap(),
+        moved.canonicalize().unwrap()
+    );
+    assert!(repository.move_worktree(&request, &path).is_err());
+}
