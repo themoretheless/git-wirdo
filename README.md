@@ -299,7 +299,8 @@ branch**, **Create worktree from commit or ref**, **Lock selected worktree**,
 **Unlock selected worktree**, and **Move selected worktree**. Creating for an
 existing branch never forces a branch already checked out elsewhere. Explicit
 bases resolve to a commit before creation. Moving preserves staged, unstaged and
-untracked files; current, primary and locked trees cannot be moved. Removal and
+untracked files; current, primary and locked trees and trees with unfinished Git
+operations cannot be moved. Removal and
 move confirmations reject stale target identities. Old recent paths remain in
 Recents until forgotten; open a moved tree at its new path. Branch details show
 the path of an already checked-out branch. Existing shortcuts are unchanged.

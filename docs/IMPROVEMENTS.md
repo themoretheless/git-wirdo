@@ -227,7 +227,7 @@ selection and lock/move, then rebase reword/edit/drop and conflict-view design.
 | W3 | Worktree locks required a separate terminal. | Palette lock with reason and typed unlock confirmation, revalidating selected path/branch/lock state. | Git porcelain oracle, stale-lock refusal, Unix PTY and native Windows ConPTY flow. |
 | W4 | Moving a linked checkout required a separate terminal. | Palette destination form and checked target snapshot, normal Git move without force. | Independent staged/unstaged/untracked content and Git registration checks; stale move refusal; real Unix PTY. |
 
-Current/primary/locked trees cannot be moved. Moving the active checkout is not
+Current/primary/locked trees and trees with unfinished Git operations cannot be moved. Moving the active checkout is not
 supported. Old recent-root settings are retained at the old path until explicitly
 forgotten; navigation can open the destination and save its own settings. Native
 Git controls submodule and destination restrictions. No new shortcut or configuration
