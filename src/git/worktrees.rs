@@ -163,6 +163,10 @@ impl Repository {
             "Cannot remove the current worktree"
         );
         let target = Self::open_with(&workspace.path, self.runner.clone())?;
+        ensure!(
+            !target.merge_state(&[])?.in_progress(),
+            "Finish or abort the Git operation in this worktree before moving or removing it"
+        );
         Ok(WorktreeRemoval {
             workspace: workspace.clone(),
             git_dir: fs::canonicalize(&target.git_dir)?,

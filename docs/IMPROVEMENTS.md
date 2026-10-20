@@ -227,9 +227,54 @@ selection and lock/move, then rebase reword/edit/drop and conflict-view design.
 | W3 | Worktree locks required a separate terminal. | Palette lock with reason and typed unlock confirmation, revalidating selected path/branch/lock state. | Git porcelain oracle, stale-lock refusal, Unix PTY and native Windows ConPTY flow. |
 | W4 | Moving a linked checkout required a separate terminal. | Palette destination form and checked target snapshot, normal Git move without force. | Independent staged/unstaged/untracked content and Git registration checks; stale move refusal; real Unix PTY. |
 
-Current/primary/locked trees cannot be moved. Moving the active checkout is not
+Current/primary/locked trees and trees with unfinished Git operations cannot be moved. Moving the active checkout is not
 supported. Old recent-root settings are retained at the old path until explicitly
 forgotten; navigation can open the destination and save its own settings. Native
 Git controls submodule and destination restrictions. No new shortcut or configuration
 format is added. Lock reasons are stored by Git; the current compact model displays
 lock state but not the reason. No performance improvement is claimed.
+
+## Visual rebase actions — 2026-10-21
+
+| ID | Previous gap | Change | Evidence |
+| --- | --- | --- | --- |
+| E1 | Rewording required an external editor. | `r` opens the complete original message; replacement text preserves Unicode, multiline bodies and literal shell characters. | Real Git message/body/tree/recovery oracles and visual/Unix PTY/native ConPTY scenarios. |
+| E2 | No edit stop in the visual todo. | `e` marks edit; successful pause opens Conflicts with an explicit paused message, then existing amend/continue/abort commands apply. | Independent rebase-state checks and continuation in a fresh Git process. |
+| E3 | Every commit had to be retained as content. | `d` explicitly marks drop; preview labels dropped commits. All prepared IDs still appear exactly once; at least one retained commit and a valid first retained action are required. | Missing/duplicate/all-drop rejection before ref mutation; file/tree/count/recovery tests. |
+| R12 | A child can emit LeaveAlternateScreen after the PTY driver's last drain but before try_wait reports exit. macOS CI reproduced an incorrect alternate-screen assertion. | Drain trailing output after observing child exit, then check terminal restoration without weakening assertions. | Original macOS CI failure and subsequent terminal suites. |
+
+Reword compiles into a generated pick/amend exec step with octal-encoded bytes;
+user shell commands remain forbidden. The generated command lives in Git's todo,
+so a later application restart/continue keeps replacement messages. No user text
+or path is interpolated as executable source. Plans are bounded to 24 KiB for
+portable environment transport. This is a Git amend operation and may execute
+configured Git commit hooks. Existing clean/attached/linear/1–200-commit guards,
+HEAD/branch checks and persistent recovery refs remain in place. No support for
+arbitrary exec, merge-preserving rebase, root rewriting or dropping every commit
+is claimed. Conflict prediction remains outside the preview.
+
+## Next conflict-view design (specification, not implemented)
+
+The current conflict detail is a combined Git diff. The next read-only preview
+should load exact stage 1/2/3 entries with literal NUL-delimited paths, then read
+blobs by their object IDs. Label them Base, Ours and Theirs, including the active
+Git operation so rebase's side meanings are clear. Missing stages mean deletion;
+binary contents and symlinks require explicit metadata views. Start with a
+switchable single pane for narrow terminals, then optionally a wide layout.
+Keep working-file editing and staging explicit. Any future block-resolution
+mutation must revalidate index stages and the working-file snapshot and have
+independent Git/index/file tests for modify/modify, add/add, modify/delete,
+rename conflicts, stale selection and abort. A preview is not a merge solver.
+
+## Special-repository audit matrix
+
+| Scenario | Current inspected implementation | Remaining validation / work |
+| --- | --- | --- |
+| Submodules | Native Git status; selected-only stash rejects directories; reset avoids recursive submodule reset. | Dedicated submodule views, nested state, dirty/untracked child preservation and explicit update policies are not implemented. |
+| Sparse checkout | Native Git behavior; worktree removal now refuses skip-worktree entries. | No sparse-pattern editor or sparse-index acceptance matrix. Test absent paths, expansion, staging and checkout before enabling an editor. |
+| Shallow / partial clone | Generic clone/open relies on Git. | No dedicated shallow-depth/filter controls or missing-object/offline/automatic-fetch acceptance matrix. |
+| Git LFS | Git filters/hooks may participate in native operations. | No LFS transfer UI, pointer/working-content distinction or offline/missing-object/error acceptance matrix. |
+
+These rows describe inspected code, not successful end-to-end support. They are
+candidates for the separately scoped next feature packages; no account/cloud
+agent requirement is introduced.

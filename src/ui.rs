@@ -124,7 +124,7 @@ impl Ui {
                     .highlight_style(Style::default().fg(Color::Cyan));
                 frame.render_stateful_widget(widget, preview, &mut self.rebase_preview);
             } else {
-                let text = "j/k select commit\nJ/K move commit\np pick, s squash, f fixup\nv preview resulting groups\nPgUp/PgDn scroll preview\nEnter review and confirm\nEsc cancel\n\nSquash combines messages.\nFixup discards its message.\nOriginal HEAD is saved for recovery.";
+                let text = "j/k select commit\nJ/K move commit\np pick, s squash, f fixup\nr reword, e edit, d drop\nv preview resulting groups\nPgUp/PgDn scroll preview\nEnter review and confirm\nEsc cancel\n\nSquash combines messages.\nFixup discards its message.\nOriginal HEAD is saved for recovery.";
                 frame.render_widget(
                     Paragraph::new(text).wrap(Wrap { trim: false }).block(
                         Block::default()
@@ -233,7 +233,7 @@ fn render_footer(frame: &mut Frame<'_>, area: Rect, app: &App) {
     } else if app.line_editor.is_some() {
         "Select lines: j/k move | PgUp/Dn, Home/End jump | Space toggle | v range | s stage | u unstage | Esc cancel".into()
     } else if app.rebase_editor.is_some() {
-        "Rebase: j/k select | J/K reorder | p pick | s squash | f fixup | v preview | PgUp/Dn preview | Enter confirm | Esc cancel".into()
+        "Rebase: j/k select | J/K reorder | p/s/f actions | r reword | e edit | d drop | v preview | PgUp/Dn preview | Enter confirm | Esc cancel".into()
     } else if app.searching {
         format!(
             "Find: {}_ (Enter search, Esc cancel)",

@@ -374,3 +374,44 @@ fn read_only_file_inspection_cannot_mark_or_open_selected_stash() {
         );
     }
 }
+
+#[test]
+fn visual_reword_drop_and_edit_show_a_pause_then_continue() {
+    let repo = TestRepo::new();
+    repo.write("base", "base");
+    repo.commit_all("base");
+    for name in ["a", "b", "c"] {
+        repo.write(name, name);
+        repo.commit_all(name);
+    }
+    let mut app = App::new(repo.open()).unwrap();
+    app.set_view(ViewMode::History);
+    app.select(3);
+    app.handle(Action::InteractiveRebase);
+    key(&mut app, KeyCode::Char('r'));
+    assert!(app.prompt().unwrap().text.contains('a'));
+    app.handle_key(KeyEvent::new(KeyCode::Char('u'), KeyModifiers::CONTROL));
+    app.handle_paste("new a\n\nretained body");
+    key(&mut app, KeyCode::Enter);
+    key(&mut app, KeyCode::Char('j'));
+    key(&mut app, KeyCode::Char('d'));
+    key(&mut app, KeyCode::Char('j'));
+    key(&mut app, KeyCode::Char('e'));
+    key(&mut app, KeyCode::Char('v'));
+    assert!(app.rebase_preview().unwrap().contains("DROP: b"));
+    key(&mut app, KeyCode::Enter);
+    app.handle_paste("rebase");
+    key(&mut app, KeyCode::Enter);
+    assert!(!app.message_is_error(), "{}", app.message());
+    assert!(app.message().contains("paused"));
+    assert_eq!(app.view(), ViewMode::Conflicts);
+    assert!(app.state().merge_state.rebase_in_progress);
+    assert!(
+        repo.git(&["log", "--format=%B"])
+            .contains("new a\n\nretained body")
+    );
+    assert!(!repo.path.join("b").exists());
+    app.handle(Action::Continue);
+    assert!(!app.message_is_error(), "{}", app.message());
+    assert!(!app.state().merge_state.rebase_in_progress);
+}

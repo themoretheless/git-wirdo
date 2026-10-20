@@ -251,8 +251,22 @@ fn unfinished_operation_is_not_discarded_with_a_clean_worktree() {
     repository.create_workspace(&path, "topic").unwrap();
     let git_dir =
         std::path::PathBuf::from(support::git(&path, &["rev-parse", "--absolute-git-dir"]).trim());
+    let before_operation = repository
+        .workspaces()
+        .unwrap()
+        .into_iter()
+        .find(|w| w.branch == "topic")
+        .unwrap();
+    let request = repository
+        .prepare_worktree_removal(&before_operation)
+        .unwrap();
     let head = support::git(&path, &["rev-parse", "HEAD"]);
     std::fs::write(git_dir.join("CHERRY_PICK_HEAD"), &head).unwrap();
+    assert!(
+        repository
+            .move_worktree(&request, &repo.directory.0.join("moved"))
+            .is_err()
+    );
     let selected = repository
         .workspaces()
         .unwrap()

@@ -320,7 +320,7 @@ impl App {
                     self.start_prefilled_prompt(
                         HistoryPrompt::Interactive(plan),
                         vec![
-                            "Rebase todo: pick / squash / fixup; newline or ; separates entries",
+                            "Rebase todo: pick / squash / fixup / edit / drop; newline or ; separates entries",
                             "Type rebase to rewrite local history",
                         ],
                         vec![todo, String::new()],
