@@ -76,7 +76,7 @@ pub fn filtered(view: ViewMode, query: &str) -> Vec<Entry> {
             ("Abort Git operation", Abort),
             ("Skip current rebase commit", SkipRebase),
         ],
-        ViewMode::Workspaces => &[
+        ViewMode::Worktrees => &[
             ("Create worktree", New),
             ("Open selected worktree", SwitchBranch),
             ("Remove selected worktree", Remove),
@@ -180,7 +180,7 @@ fn view_title(view: ViewMode) -> Option<&'static str> {
         ViewMode::History => "View commit history",
         ViewMode::Branches => "View branches",
         ViewMode::Conflicts => "View conflicts and operation recovery",
-        ViewMode::Workspaces => "View worktrees",
+        ViewMode::Worktrees => "View worktrees",
         ViewMode::PullRequests => "View pull requests",
         ViewMode::GitHubRepositories => "View GitHub repositories",
         ViewMode::Stashes => "View stashes",

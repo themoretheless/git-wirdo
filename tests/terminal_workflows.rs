@@ -525,10 +525,10 @@ fn linked_worktree_creation_open_recent_return_and_guarded_removal_are_end_to_en
     repo.commit_all("base");
     let workspace = repo.directory.0.join("linked terminal workspace");
     let mut terminal = tui(&repo);
-    terminal.view("Workspaces");
-    terminal.key(b"N", "Workspace path");
+    terminal.view("Worktrees");
+    terminal.key(b"N", "Worktree path");
     terminal.field(workspace.to_str().unwrap(), "New branch name:");
-    terminal.field("topic", "Workspace created");
+    terminal.field("topic", "Worktree created");
     assert!(workspace.join(".git").is_file());
     // worktree list returns the primary checkout followed by its linked tree.
     terminal.key(b"j", "Branch: topic");
@@ -541,8 +541,8 @@ fn linked_worktree_creation_open_recent_return_and_guarded_removal_are_end_to_en
     std::fs::write(workspace.join("unsaved"), "retain linked work\n").unwrap();
     terminal.key(b"r", "unsaved");
     terminal.key(b"I", "View: RecentRepositories");
-    terminal.key(b"j", "Saved view: Workspaces");
-    terminal.key(b"\r", "View: Workspaces");
+    terminal.key(b"j", "Saved view: Worktrees");
+    terminal.key(b"\r", "View: Worktrees");
     terminal.key(b"j", "Branch: topic");
     terminal.key(b"D", "Type remove to confirm:");
     terminal.field("remove", "contains modified");
@@ -550,7 +550,32 @@ fn linked_worktree_creation_open_recent_return_and_guarded_removal_are_end_to_en
     std::fs::remove_file(workspace.join("unsaved")).unwrap();
     terminal.key(b"r", "Action: Refreshed");
     terminal.key(b"D", "Type remove to confirm:");
-    terminal.field("remove", "Workspace removed; branch retained");
+    support::git(&workspace, &["switch", "-c", "replacement"]);
+    terminal.field("remove", "Worktree changed");
+    assert!(workspace.join("file").exists());
+    support::git(&workspace, &["switch", "topic"]);
+    support::git(
+        &workspace,
+        &["config", "core.excludesFile", "ignored-patterns"],
+    );
+    std::fs::write(
+        workspace.join("ignored-patterns"),
+        "ignored-patterns\nnotes\n",
+    )
+    .unwrap();
+    std::fs::write(workspace.join("notes"), "private ignored notes\n").unwrap();
+    terminal.key(b"r", "Action: Refreshed");
+    terminal.key(b"D", "Type remove to confirm:");
+    terminal.field("remove", "contains modified, untracked or ignored");
+    assert_eq!(
+        std::fs::read_to_string(workspace.join("notes")).unwrap(),
+        "private ignored notes\n"
+    );
+    std::fs::remove_file(workspace.join("notes")).unwrap();
+    std::fs::remove_file(workspace.join("ignored-patterns")).unwrap();
+    terminal.key(b"r", "Action: Refreshed");
+    terminal.key(b"D", "Type remove to confirm:");
+    terminal.field("remove", "Worktree removed; branch retained");
     assert!(!workspace.exists());
     assert!(
         repo.git(&["show-ref", "--verify", "refs/heads/topic"])

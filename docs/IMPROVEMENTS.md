@@ -166,3 +166,53 @@ The ConPTY flow returns from Hunks through the existing View files palette entry
 Tab cycles through Reflog and other views instead of jumping directly to Files.
 The Hunks footer now describes that navigation accurately. Git/index/stash oracles
 and terminal deadlines are unchanged.
+
+
+## Reliability restart — 2026-10-21
+
+The accepted 2026-10-14/15 work is retained. Workspaces terminology is now
+Worktrees throughout the UI, with the old CLI flag and persisted view spelling
+kept compatible. The following are reproduced defects, not hypothetical features.
+
+| ID | Reproduction before fix | Change | Evidence |
+| --- | --- | --- | --- |
+| R8 | Open removal confirmation, switch the linked tree to another branch externally, then confirm. The replacement checkout was deleted. | Capture branch, HEAD and canonical Git directory before confirmation; revalidate on submit. Preparation runs in the cancellable worker. | `removal_confirmation_rejects_a_different_branch_at_the_selected_path`; separate HEAD-movement test; Unix PTY repeats external branch change. |
+| R9 | Create an ignored directory containing personal notes in an otherwise clean linked tree; remove it. Native Git deletes ignored contents even without force. | Inspect ignored and untracked paths before deletion and refuse nonempty status. | `ignored_files_are_retained_when_removing_a_worktree`; Unix PTY verifies ignored contents remain. |
+| R10 | Mark a tracked file assume-unchanged, edit it, remove the tree. Native Git deletes the hidden edits. | Refuse removal with assume-unchanged or skip-worktree index entries. Real index flags are not modified. | `assume_unchanged_edits_are_not_deleted_with_a_worktree`. |
+| R11 | Retain CHERRY_PICK_HEAD while files/index are clean, then remove the tree. Native Git discards the operation state. | Check per-worktree merge/rebase/am/cherry-pick/revert state before removal. | `unfinished_operation_is_not_discarded_with_a_clean_worktree` verifies marker and files retained. |
+
+The four reproductions failed before their respective fixes. Additional tests
+cover a new lock or untracked file after confirmation and preservation of branch
+refs/unique commits. This is not filesystem-wide exclusion: an external process
+can still change files after the final check. No force removal is used, and no
+existing user branch or worktree is deleted by development work.
+
+### Fresh baseline
+
+[Raw probes and environment](performance-2026-10-21.json) record release Rust
+1.98.1 on macOS arm64, one warmup and 15 samples per probe. The original runner's
+`rustc` field reports the default shell toolchain; `probe_build_rustc` records the
+actual compiler used to build the executable. The same existing probe and
+fixtures were used. The host was concurrently running validation and other work;
+load is recorded. These are baseline measurements, not an optimization result.
+
+| Fixture | Startup median / p95 ms | Refresh median / p95 ms | Open diff median / p95 ms | Search median / p95 ms | Cancel total median / p95 ms | Max RSS MiB |
+| --- | --- | --- | --- | --- | --- | --- |
+| 20 commits / 10 files | 136.23 / 154.28 | 138.29 / 152.42 | 27.98 / 41.64 | 1.44 / 1.52 | 61.96 / 62.95 | 22.69 |
+| 3000 commits / 10 files | 159.54 / 255.80 | 142.95 / 178.99 | 29.14 / 44.77 | 1.45 / 1.70 | 58.99 / 62.58 | 24.06 |
+| 20 commits / 3000 files | 420.67 / 682.40 | 681.91 / 957.69 | 54.89 / 70.12 | 2.75 / 4.63 | 57.46 / 64.16 | 16.97 |
+
+Cancel includes the intentional 25 ms wait. The ordinary render probe does not
+measure large-diff terminal drawing; open_diff advances/clamps through file rows.
+15-sample p95 is the largest observation. Startup times App construction after
+repository discovery. No startup, refresh or memory improvement is claimed.
+
+### Remaining audit / feature queue
+
+This register is not 2000 completed improvements. Remaining investigations include
+fault injection for disk-full/permission errors and process exit at every selected
+stash cleanup boundary; reproducible large-diff drawing/input latency; and broader
+cross-platform filesystem races. Existing injected stash failures, cancellation,
+panic recovery, stale index/HEAD, snapshot refresh and terminal tests remain
+required gates. Feature delivery follows reliability gates: worktree branch/base
+selection and lock/move, then rebase reword/edit/drop and conflict-view design.

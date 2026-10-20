@@ -291,7 +291,7 @@ impl App {
                 self.github_repositories.items =
                     crate::github::repositories(self.repository.root())?;
             }
-            ViewMode::Workspaces => self.workspaces.items = self.repository.workspaces()?,
+            ViewMode::Worktrees => self.workspaces.items = self.repository.workspaces()?,
             ViewMode::PrFiles => {
                 self.pr_files.items.clear();
                 if let Some(pr) = &self.review_pr {
@@ -337,7 +337,7 @@ impl App {
             ViewMode::Branches => self.branch_selection,
             ViewMode::Conflicts => self.conflict_selection,
             ViewMode::GitHubRepositories => self.github_repositories.selection,
-            ViewMode::Workspaces => self.workspaces.selection,
+            ViewMode::Worktrees => self.workspaces.selection,
             ViewMode::PullRequests => self.pull_requests.selection,
         }
     }
@@ -387,7 +387,7 @@ impl App {
             ViewMode::RemoteBranches => self.remote_branches.cursor(),
             ViewMode::Stashes => self.stashes.cursor(),
             ViewMode::GitHubRepositories => self.github_repositories.cursor(),
-            ViewMode::Workspaces => self.workspaces.cursor(),
+            ViewMode::Worktrees => self.workspaces.cursor(),
             ViewMode::PullRequests => self.pull_requests.cursor(),
         }
     }

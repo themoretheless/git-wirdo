@@ -231,12 +231,12 @@ fn native_windows_terminal_opens_worktrees_and_generic_local_clone() {
         "base"
     );
     assert!(!cloned.join("retain").exists());
-    for view in ["History", "Branches", "Conflicts", "Workspaces"] {
+    for view in ["History", "Branches", "Conflicts", "Worktrees"] {
         terminal.key(b"\t", &format!("View: {view}"));
     }
-    terminal.key(b"N", "Workspace path (relative to repo or absolute):");
+    terminal.key(b"N", "Worktree path (relative to repo or absolute):");
     terminal.field(workspace.to_str().unwrap(), "New branch name:");
-    terminal.field("native-worktree", "Workspace created");
+    terminal.field("native-worktree", "Worktree created");
     terminal.key(b"O", "Repository path:");
     terminal.field(workspace.to_str().unwrap(), "Opened repository");
     assert_eq!(

@@ -6,7 +6,7 @@ use anyhow::{Result, ensure};
 use super::Submitted;
 use crate::app::App;
 use crate::git::Repository;
-use crate::model::Workspace;
+use crate::git::WorktreeRemoval;
 
 #[derive(Debug, Clone)]
 pub enum RepositoryPrompt {
@@ -16,7 +16,7 @@ pub enum RepositoryPrompt {
     /// Clone the named GitHub repository.
     CloneGitHub(String),
     CreateWorktree,
-    RemoveWorktree(Workspace),
+    RemoveWorktree(WorktreeRemoval),
 }
 
 impl RepositoryPrompt {
@@ -46,12 +46,12 @@ impl RepositoryPrompt {
             }
             Self::CreateWorktree => {
                 app.repository.create_workspace(Path::new(&v[0]), &v[1])?;
-                return Ok("Workspace created".into());
+                return Ok("Worktree created".into());
             }
             Self::RemoveWorktree(workspace) => {
                 ensure!(v[0] == "remove", "Removal cancelled: type remove exactly");
-                app.repository.remove_workspace(&workspace)?;
-                return Ok("Workspace removed; branch retained".into());
+                app.repository.remove_prepared_worktree(&workspace)?;
+                return Ok("Worktree removed; branch retained".into());
             }
         };
         app.open_repository(&opened)?;

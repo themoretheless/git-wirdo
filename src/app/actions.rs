@@ -127,7 +127,7 @@ impl Action {
             // Editing a pull request fetches its current text before the prompt opens.
             Self::EditRemote => view != ViewMode::PullRequests,
             // Discarding a file snapshots it before asking for confirmation.
-            Self::Remove => view != ViewMode::Files,
+            Self::Remove => !matches!(view, ViewMode::Files | ViewMode::Worktrees),
             _ => false,
         }
     }
@@ -733,10 +733,10 @@ impl App {
             Action::OpenRepository => {
                 self.start_prompt(RepositoryPrompt::Open, vec!["Repository path"])
             }
-            Action::New if self.view == ViewMode::Workspaces => self.start_prompt(
+            Action::New if self.view == ViewMode::Worktrees => self.start_prompt(
                 RepositoryPrompt::CreateWorktree,
                 vec![
-                    "Workspace path (relative to repo or absolute)",
+                    "Worktree path (relative to repo or absolute)",
                     "New branch name",
                 ],
             ),
@@ -749,11 +749,13 @@ impl App {
                     "Published head branch (or owner:branch)",
                 ],
             ),
-            Action::Remove if self.view == ViewMode::Workspaces => {
+            Action::Remove if self.view == ViewMode::Worktrees => {
                 if let Some(w) = self.workspaces.selected().cloned() {
                     self.message = format!("Remove {}? Branch will remain.", display_path(&w.path));
                     self.start_prompt(
-                        RepositoryPrompt::RemoveWorktree(w),
+                        RepositoryPrompt::RemoveWorktree(
+                            self.repository.prepare_worktree_removal(&w)?,
+                        ),
                         vec!["Type remove to confirm"],
                     );
                 }
@@ -795,7 +797,7 @@ impl App {
                     self.detail_column = 0;
                 }
             }
-            Action::SwitchBranch if self.view == ViewMode::Workspaces => {
+            Action::SwitchBranch if self.view == ViewMode::Worktrees => {
                 if let Some(w) = self.workspaces.selected() {
                     let path = w.path.clone();
                     self.open_repository(&path)?;

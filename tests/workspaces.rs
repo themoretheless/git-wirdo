@@ -39,7 +39,7 @@ fn create_switch_and_remove_workspaces_preserves_dirty_files_and_branches() {
     );
     repo.git(&["worktree", "unlock", path.to_str().unwrap()]);
     let mut app = App::new(repo.open()).unwrap();
-    app.set_view(ViewMode::Workspaces);
+    app.set_view(ViewMode::Worktrees);
     app.refresh().unwrap();
     app.select(
         app.workspaces()
@@ -76,7 +76,7 @@ fn prompts_consume_shortcuts_and_require_explicit_remove_confirmation() {
     repo.commit_all("base");
     let path = repo.directory.0.join("review");
     let mut app = App::new(repo.open()).unwrap();
-    app.set_view(ViewMode::Workspaces);
+    app.set_view(ViewMode::Worktrees);
     app.refresh().unwrap();
     app.handle(Action::New);
     type_text(&mut app, path.to_str().unwrap());
@@ -115,4 +115,154 @@ fn failed_open_preserves_current_repo_and_escape_cancels_prompt() {
     app.handle(Action::OpenRepository);
     app.handle_key(KeyEvent::new(KeyCode::Esc, KeyModifiers::NONE));
     assert!(app.prompt().is_none());
+}
+
+#[test]
+fn removal_confirmation_rejects_a_different_branch_at_the_selected_path() {
+    let repo = TestRepo::new();
+    repo.write("file", "base\n");
+    repo.commit_all("base");
+    let path = repo.directory.0.join("review");
+    repo.open().create_workspace(&path, "topic").unwrap();
+    let mut app = App::new(repo.open()).unwrap();
+    app.set_view(ViewMode::Worktrees);
+    app.refresh().unwrap();
+    app.select(
+        app.workspaces()
+            .items
+            .iter()
+            .position(|w| w.branch == "topic")
+            .unwrap(),
+    );
+    app.handle(Action::Remove);
+    support::git(&path, &["switch", "-c", "replacement"]);
+    type_text(&mut app, "remove");
+    assert!(app.message_is_error(), "{}", app.message());
+    assert!(path.join("file").exists());
+    assert_eq!(
+        support::git(&path, &["branch", "--show-current"]).trim(),
+        "replacement"
+    );
+}
+
+#[test]
+fn removal_confirmation_rejects_new_head_and_keeps_unique_commit() {
+    let repo = TestRepo::new();
+    repo.write("file", "base\n");
+    repo.commit_all("base");
+    let path = repo.directory.0.join("review");
+    let repository = repo.open();
+    repository.create_workspace(&path, "topic").unwrap();
+    let selected = repository
+        .workspaces()
+        .unwrap()
+        .into_iter()
+        .find(|w| w.branch == "topic")
+        .unwrap();
+    let request = repository.prepare_worktree_removal(&selected).unwrap();
+    support::git(&path, &["commit", "--allow-empty", "-m", "unique"]);
+    let head = support::git(&path, &["rev-parse", "HEAD"]);
+    assert!(repository.remove_prepared_worktree(&request).is_err());
+    assert!(path.join(".git").is_file());
+    assert_eq!(support::git(&path, &["rev-parse", "HEAD"]), head);
+    assert_eq!(repo.git(&["rev-parse", "topic"]), head);
+}
+
+#[test]
+fn lock_or_new_untracked_file_after_confirmation_prevents_removal() {
+    let repo = TestRepo::new();
+    repo.write("file", "base\n");
+    repo.commit_all("base");
+    let path = repo.directory.0.join("review");
+    let repository = repo.open();
+    repository.create_workspace(&path, "topic").unwrap();
+    let selected = repository
+        .workspaces()
+        .unwrap()
+        .into_iter()
+        .find(|w| w.branch == "topic")
+        .unwrap();
+    let request = repository.prepare_worktree_removal(&selected).unwrap();
+    repo.git(&["worktree", "lock", path.to_str().unwrap()]);
+    assert!(repository.remove_prepared_worktree(&request).is_err());
+    repo.git(&["worktree", "unlock", path.to_str().unwrap()]);
+    std::fs::write(path.join("new"), "retain\n").unwrap();
+    assert!(repository.remove_prepared_worktree(&request).is_err());
+    assert_eq!(
+        std::fs::read_to_string(path.join("new")).unwrap(),
+        "retain\n"
+    );
+    assert_eq!(support::git(&path, &["show", ":file"]), "base\n");
+}
+
+#[test]
+fn ignored_files_are_retained_when_removing_a_worktree() {
+    let repo = TestRepo::new();
+    repo.write(".gitignore", "private/\n");
+    repo.commit_all("base");
+    let path = repo.directory.0.join("review");
+    let repository = repo.open();
+    repository.create_workspace(&path, "topic").unwrap();
+    std::fs::create_dir(path.join("private")).unwrap();
+    std::fs::write(path.join("private/notes"), "retain ignored notes\n").unwrap();
+    let selected = repository
+        .workspaces()
+        .unwrap()
+        .into_iter()
+        .find(|w| w.branch == "topic")
+        .unwrap();
+    assert!(repository.remove_workspace(&selected).is_err());
+    assert_eq!(
+        std::fs::read_to_string(path.join("private/notes")).unwrap(),
+        "retain ignored notes\n"
+    );
+}
+
+#[test]
+fn assume_unchanged_edits_are_not_deleted_with_a_worktree() {
+    let repo = TestRepo::new();
+    repo.write("file", "base\n");
+    repo.commit_all("base");
+    let path = repo.directory.0.join("review");
+    let repository = repo.open();
+    repository.create_workspace(&path, "topic").unwrap();
+    support::git(&path, &["update-index", "--assume-unchanged", "file"]);
+    std::fs::write(path.join("file"), "hidden edits\n").unwrap();
+    let selected = repository
+        .workspaces()
+        .unwrap()
+        .into_iter()
+        .find(|w| w.branch == "topic")
+        .unwrap();
+    assert!(repository.remove_workspace(&selected).is_err());
+    assert_eq!(
+        std::fs::read_to_string(path.join("file")).unwrap(),
+        "hidden edits\n"
+    );
+}
+
+#[test]
+fn unfinished_operation_is_not_discarded_with_a_clean_worktree() {
+    let repo = TestRepo::new();
+    repo.write("file", "base\n");
+    repo.commit_all("base");
+    let path = repo.directory.0.join("review");
+    let repository = repo.open();
+    repository.create_workspace(&path, "topic").unwrap();
+    let git_dir =
+        std::path::PathBuf::from(support::git(&path, &["rev-parse", "--absolute-git-dir"]).trim());
+    let head = support::git(&path, &["rev-parse", "HEAD"]);
+    std::fs::write(git_dir.join("CHERRY_PICK_HEAD"), &head).unwrap();
+    let selected = repository
+        .workspaces()
+        .unwrap()
+        .into_iter()
+        .find(|w| w.branch == "topic")
+        .unwrap();
+    assert!(repository.remove_workspace(&selected).is_err());
+    assert_eq!(
+        std::fs::read_to_string(git_dir.join("CHERRY_PICK_HEAD")).unwrap(),
+        head
+    );
+    assert!(path.join("file").exists());
 }
