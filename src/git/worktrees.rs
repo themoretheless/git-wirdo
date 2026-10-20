@@ -10,6 +10,12 @@ pub struct WorktreeRemoval {
     head_ref: Vec<u8>,
 }
 
+impl WorktreeRemoval {
+    pub fn is_detached(&self) -> bool {
+        std::str::from_utf8(&self.head_ref).is_ok_and(|name| name.trim() == "HEAD")
+    }
+}
+
 impl Repository {
     pub fn workspaces(&self) -> Result<Vec<crate::model::Workspace>> {
         let bytes = self.git(["worktree", "list", "--porcelain", "-z"])?;
@@ -207,6 +213,27 @@ impl Repository {
                 .is_empty(),
             "Worktree contains modified, untracked or ignored files; save or move them before removing"
         );
+        if request.is_detached() {
+            let head = utf8_line(&request.head)?;
+            self.verify_commit_id(&head)?;
+            let stamp = std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)?
+                .as_nanos();
+            let recovery = format!(
+                "refs/git-wirdo/recovery/worktree-{stamp}-{}",
+                std::process::id()
+            );
+            // A detached checkout has no branch retaining its commits. Save its tip
+            // before deletion; failure must leave the checkout intact. Native GC and
+            // reflog expiration cannot discard a commit reachable through this ref.
+            self.git([
+                "update-ref",
+                "--create-reflog",
+                &recovery,
+                &head,
+                &"0".repeat(head.len()),
+            ])?;
+        }
         // Git refuses the primary checkout, dirty worktrees and locked worktrees. Never force.
         self.git([
             OsString::from("worktree"),

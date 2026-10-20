@@ -292,7 +292,9 @@ primary checkout, dirty and locked worktrees cannot be removed. Ignored files,
 assume-unchanged/skip-worktree entries and unfinished Git operations also block
 removal. Confirmation captures the branch, HEAD and Git directory and rejects
 changed targets before removal. Branches are
-retained, including their unique commits; removal never uses force.
+retained, including their unique commits; removal never uses force. A detached
+worktree's HEAD is saved in persistent recovery refs before removal and is visible
+through Reflog, including after reflog expiration or garbage collection.
 
 The command palette in Worktrees also offers **Create worktree for existing
 branch**, **Create worktree from commit or ref**, **Lock selected worktree**,

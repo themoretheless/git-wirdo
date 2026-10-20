@@ -278,3 +278,31 @@ rename conflicts, stale selection and abort. A preview is not a merge solver.
 These rows describe inspected code, not successful end-to-end support. They are
 candidates for the separately scoped next feature packages; no account/cloud
 agent requirement is introduced.
+
+
+## Detached worktree recovery — 2026-10-21
+
+R13: removing a clean detached worktree with a unique commit deleted its last HEAD
+reference/reflog; no branch retained the commit. A real-Git regression reproduced
+the missing reference. Removal now creates a persistent `refs/git-wirdo/recovery/`
+reference before deletion; failure to store it prevents removal. The UI identifies
+this outcome separately from retaining an attached branch. A recovery reference
+can remain after native removal fails, which is intentionally recoverable.
+
+The regression expires all reflogs and runs immediate GC in its disposable fixture,
+then independently reads the original committed file. The original checkout HEAD
+stays unchanged. Recovery references use the existing Reflog view and recovery-to-
+new-branch flow. No user repository reflogs, objects, branches or worktrees are
+expired or removed by the test.
+
+Recovery-ref write failures are injected as permission-denied and storage-full
+errors before command execution; both must retain the checkout, index and HEAD.
+These do not simulate a partially written physical filesystem or actual full disk.
+Unix PTY and native Windows ConPTY scenarios verify the detached-specific outcome
+and discovery in Reflog.
+
+R14: the new terminal recovery workflow exposed a display problem: full recovery
+ref names and full SHA values consumed the list pane, hiding commit subjects.
+Rows now use a compact recovery label and 12-character ID, preserving the full
+selector and SHA in the model. The same terminal scenario requires the unique
+commit subject to be visible in Reflog; it failed before this UI adjustment.

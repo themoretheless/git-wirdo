@@ -792,7 +792,10 @@ impl App {
             ),
             Action::Remove if self.view == ViewMode::Worktrees => {
                 if let Some(w) = self.workspaces.selected().cloned() {
-                    self.message = format!("Remove {}? Branch will remain.", display_path(&w.path));
+                    self.message = format!(
+                        "Remove {}? Branch or detached HEAD will be retained.",
+                        display_path(&w.path)
+                    );
                     self.start_prompt(
                         RepositoryPrompt::RemoveWorktree(
                             self.repository.prepare_worktree_removal(&w)?,
