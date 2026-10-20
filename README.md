@@ -633,8 +633,9 @@ performance, acceptance evidence and candidates for the next feature stage.
   controls work through native Windows input without multiline paste.
   The command palette retains **Edit raw rebase todo**, accepting full IDs and
   newline/`;` separators (native Windows paste uses `;`). The editor accepts
-  1–200 commits in clean, linear, attached-branch history, always retaining every
-  commit exactly once, including explicit drops. Original HEAD is saved in recovery refs visible through
+  1–200 commits in clean, linear, attached-branch history, always listing every
+  prepared commit exactly once, including explicit drop actions. Original HEAD is
+  saved in recovery refs visible through
   Reflog. Conflicts and edit stops use existing `e` continue, `K` skip and `x` abort
   controls; amend an edit-stop commit before continuing. Reword messages survive
   stops and a later application restart. The generated plan is limited to 24 KiB
