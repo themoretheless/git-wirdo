@@ -1,0 +1,209 @@
+{
+  "runs": [
+    {
+      "case": "small",
+      "variant": "after",
+      "binary_sha256": "4c3dbc8c5a1fd3f52e4da63ecaca4c651f3a813f15154362df5cb54cedb34eac",
+      "elapsed_seconds": 10.854257750001125,
+      "load_before": [
+        28.40625,
+        17.80322265625,
+        15.06640625
+      ],
+      "load_after": [
+        25.3349609375,
+        17.6474609375,
+        15.05859375
+      ]
+    },
+    {
+      "case": "history",
+      "variant": "after",
+      "binary_sha256": "4c3dbc8c5a1fd3f52e4da63ecaca4c651f3a813f15154362df5cb54cedb34eac",
+      "elapsed_seconds": 11.864869665998413,
+      "load_before": [
+        25.3349609375,
+        17.6474609375,
+        15.05859375
+      ],
+      "load_after": [
+        22.9033203125,
+        17.37841796875,
+        14.9931640625
+      ]
+    },
+    {
+      "case": "files",
+      "variant": "after",
+      "binary_sha256": "4c3dbc8c5a1fd3f52e4da63ecaca4c651f3a813f15154362df5cb54cedb34eac",
+      "elapsed_seconds": 31.767603500000405,
+      "load_before": [
+        21.62939453125,
+        17.2060546875,
+        14.9462890625
+      ],
+      "load_after": [
+        42.54150390625,
+        22.38037109375,
+        16.8798828125
+      ]
+    }
+  ],
+  "platform": "macOS-26.7.2-arm64-arm-64bit-Mach-O",
+  "rustc": "rustc 1.101.0-nightly (4ebd25825 2026-10-15)",
+  "probe_build_rustc": "rustc 1.98.1 (48a229cea 2026-09-01)",
+  "source": "f28d95a plus pending Worktrees terminology rename, before removal safeguards",
+  "comparison": "Baseline only; no before/after speedup claim",
+  "cases": {
+    "small": {
+      "probes": [
+        {
+          "median_ms": 136.225916,
+          "p95_ms": 154.283792,
+          "probe": "startup"
+        },
+        {
+          "median_ms": 138.286834,
+          "p95_ms": 152.418,
+          "probe": "refresh"
+        },
+        {
+          "median_ms": 251.491625,
+          "p95_ms": 275.773125,
+          "probe": "background_refresh"
+        },
+        {
+          "median_ms": 0.064583,
+          "p95_ms": 0.073834,
+          "probe": "render"
+        },
+        {
+          "median_ms": 27.980999999999998,
+          "p95_ms": 41.643542,
+          "probe": "open_diff"
+        },
+        {
+          "median_ms": 0.49854200000000004,
+          "p95_ms": 0.512583,
+          "probe": "page_down_100"
+        },
+        {
+          "median_ms": 1.4411669999999999,
+          "p95_ms": 1.522334,
+          "probe": "search"
+        },
+        {
+          "median_ms": 0.553125,
+          "p95_ms": 0.607541,
+          "probe": "session_scroll_100"
+        },
+        {
+          "median_ms": 61.964834,
+          "p95_ms": 62.95079200000001,
+          "probe": "cancel"
+        }
+      ],
+      "maximum_rss_bytes": 23789568
+    },
+    "history": {
+      "probes": [
+        {
+          "median_ms": 159.54020799999998,
+          "p95_ms": 255.800875,
+          "probe": "startup"
+        },
+        {
+          "median_ms": 142.946417,
+          "p95_ms": 178.98875,
+          "probe": "refresh"
+        },
+        {
+          "median_ms": 300.960208,
+          "p95_ms": 438.417125,
+          "probe": "background_refresh"
+        },
+        {
+          "median_ms": 0.071125,
+          "p95_ms": 0.117042,
+          "probe": "render"
+        },
+        {
+          "median_ms": 29.137625,
+          "p95_ms": 44.767583,
+          "probe": "open_diff"
+        },
+        {
+          "median_ms": 0.5365,
+          "p95_ms": 0.5735,
+          "probe": "page_down_100"
+        },
+        {
+          "median_ms": 1.451375,
+          "p95_ms": 1.6955419999999999,
+          "probe": "search"
+        },
+        {
+          "median_ms": 0.7975420000000001,
+          "p95_ms": 1.1820419999999998,
+          "probe": "session_scroll_100"
+        },
+        {
+          "median_ms": 58.990708000000005,
+          "p95_ms": 62.580417,
+          "probe": "cancel"
+        }
+      ],
+      "maximum_rss_bytes": 25231360
+    },
+    "files": {
+      "probes": [
+        {
+          "median_ms": 420.672583,
+          "p95_ms": 682.403666,
+          "probe": "startup"
+        },
+        {
+          "median_ms": 681.908917,
+          "p95_ms": 957.6878330000001,
+          "probe": "refresh"
+        },
+        {
+          "median_ms": 616.7978750000001,
+          "p95_ms": 833.245041,
+          "probe": "background_refresh"
+        },
+        {
+          "median_ms": 1.542958,
+          "p95_ms": 3.0173330000000003,
+          "probe": "render"
+        },
+        {
+          "median_ms": 54.888459,
+          "p95_ms": 70.122167,
+          "probe": "open_diff"
+        },
+        {
+          "median_ms": 0.700208,
+          "p95_ms": 2.451083,
+          "probe": "page_down_100"
+        },
+        {
+          "median_ms": 2.750667,
+          "p95_ms": 4.629834,
+          "probe": "search"
+        },
+        {
+          "median_ms": 0.715208,
+          "p95_ms": 1.332875,
+          "probe": "session_scroll_100"
+        },
+        {
+          "median_ms": 57.457665999999996,
+          "p95_ms": 64.155375,
+          "probe": "cancel"
+        }
+      ],
+      "maximum_rss_bytes": 17793024
+    }
+  }
+}

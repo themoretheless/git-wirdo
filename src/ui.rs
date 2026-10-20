@@ -325,7 +325,7 @@ fn shortcuts(view: ViewMode) -> &'static str {
         ViewMode::GitHubRepositories => {
             "enter clone | N create repository | G auth status | O open local repository"
         }
-        ViewMode::Workspaces => "enter open | N create | D remove | O open repository",
+        ViewMode::Worktrees => "enter open | N create | D remove | O open repository",
         ViewMode::PrFiles => "j/k file | C line comment | PgUp/PgDn patch | r refresh",
         ViewMode::PullRequests => {
             "i files | U filter | + more | L edit | T draft/ready | M merge | A/R review | C comment | V diff"
@@ -395,7 +395,7 @@ fn list_items(app: &App) -> (Vec<ListItem<'static>>, bool) {
                 .collect(),
             "No repositories",
         ),
-        ViewMode::Workspaces => (
+        ViewMode::Worktrees => (
             app.workspaces
                 .items
                 .iter()
@@ -408,7 +408,7 @@ fn list_items(app: &App) -> (Vec<ListItem<'static>>, bool) {
                     )
                 })
                 .collect(),
-            "No workspaces",
+            "No worktrees",
         ),
         ViewMode::PrFiles => (
             app.pr_files

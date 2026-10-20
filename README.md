@@ -58,7 +58,7 @@ git-wirdo --repo /path/to/repo
 
 | Key | View | Action |
 | --- | --- | --- |
-| `Tab` | Any | Cycle views (including workspaces, PRs, stashes and remotes) |
+| `Tab` | Any | Cycle views (including worktrees, PRs, stashes and remotes) |
 | `j` / `k`, `↓` / `↑` | Any | Move the selection; the list follows it |
 | `r` | Any | Refresh repository state and the detail pane; local views also reload by themselves within about two seconds after another tool edits, stages, commits or switches branches |
 | `PageUp` / `PageDown` | Any | Scroll details by ten lines |
@@ -276,19 +276,22 @@ replaced or automatically removed. Git operation cancellation remains available
 while generating the patch; writing the completed output is a synchronous local
 file write. Exports do not send email or publish anything remotely.
 
-## Workspaces and GitHub
+## Worktrees and GitHub
 
-Tab cycles Files → History → Branches → Conflicts → Workspaces → PullRequests →
+Tab cycles Files → History → Branches → Conflicts → Worktrees → PullRequests →
 GitHubRepositories → Stashes → Remotes → RemoteBranches → Tags → Hunks → Reflog → PrFiles → RecentRepositories. `O` opens another local repository by path; the previous
 checkout and its files remain on disk. Relative paths are resolved from the
-current repository root. Workspaces are Git linked worktrees, not cloud sessions. Listing uses the
+current repository root. Worktrees are Git linked working directories. Listing uses the
 [NUL-delimited porcelain format](https://git-scm.com/docs/git-worktree/2.36.0),
 so Git 2.36 or newer is required.
 
-In Workspaces, `Enter` opens the selected checkout. `N` asks for a new directory
+In Worktrees, `Enter` opens the selected checkout. `N` asks for a new directory
 and new branch name, then creates a worktree from the current HEAD. `D` asks you
 to type `remove` before removing the selected worktree. The current checkout,
-primary checkout, dirty and locked worktrees cannot be removed. Branches are
+primary checkout, dirty and locked worktrees cannot be removed. Ignored files,
+assume-unchanged/skip-worktree entries and unfinished Git operations also block
+removal. Confirmation captures the branch, HEAD and Git directory and rejects
+changed targets before removal. Branches are
 retained, including their unique commits; removal never uses force.
 
 `I` opens RecentRepositories: up to 50 recently opened repository/worktree roots,
@@ -390,7 +393,7 @@ line-numbered patches; `--list-prs` accepts `--pr-state`, `--pr-search`, and
 Read-only CLI output is also available without an interactive terminal:
 
 ```bash
-git-wirdo --list-workspaces
+git-wirdo --list-worktrees # --list-workspaces remains supported
 git-wirdo --list-prs
 git-wirdo --pr 123
 git-wirdo --list-github-repos
@@ -498,10 +501,10 @@ Before every reset, the previous HEAD is saved in a persistent local
 committed history from garbage collection; it does **not** save discarded
 uncommitted changes. No force push is performed.
 
-Reflog shows the current workspace's HEAD movements and persistent pre-reset references, including commits no longer
+Reflog shows the current worktree's HEAD movements and persistent pre-reset references, including commits no longer
 on a branch. `+` loads older entries. `N` creates a new named branch at the
 selected immutable commit ID without switching checkout or touching local edits.
-Existing branches cannot be overwritten. `--list-reflog` lists the first 100 HEAD entries plus up to 100 recovery references without starting the terminal UI. Linked workspaces have separate HEAD
+Existing branches cannot be overwritten. `--list-reflog` lists the first 100 HEAD entries plus up to 100 recovery references without starting the terminal UI. Linked worktrees have separate HEAD
 reflogs; Git's configured reflog expiration still applies.
 
 

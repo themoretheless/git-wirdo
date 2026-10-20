@@ -118,12 +118,12 @@ fn diff_paging_and_seen_progress_are_visible() {
 fn workspaces_and_pr_prompts_render_inside_existing_tui() {
     let fixture = TestRepo::new();
     let mut app = App::new(fixture.open()).unwrap();
-    app.set_view(git_wirdo::model::ViewMode::Workspaces);
+    app.set_view(git_wirdo::model::ViewMode::Worktrees);
     app.refresh().unwrap();
     let rendered = screen(&app, 120, 24);
-    assert!(rendered.contains("View: Workspaces") && rendered.contains("N create"));
+    assert!(rendered.contains("View: Worktrees") && rendered.contains("N create"));
     app.handle(Action::New);
-    assert!(screen(&app, 120, 24).contains("Workspace path"));
+    assert!(screen(&app, 120, 24).contains("Worktree path"));
     app.cancel_prompt();
     app.set_view(git_wirdo::model::ViewMode::PullRequests);
     app.handle(Action::New);

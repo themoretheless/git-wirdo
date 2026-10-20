@@ -45,8 +45,12 @@ struct Cli {
     /// Authenticate GitHub CLI interactively before opening the TUI.
     #[arg(long)]
     github_login: bool,
-    /// List local workspaces without starting the TUI.
-    #[arg(long, group = "inspection")]
+    /// List local worktrees without starting the TUI.
+    #[arg(
+        long = "list-worktrees",
+        alias = "list-workspaces",
+        group = "inspection"
+    )]
     list_workspaces: bool,
     /// List saved stashes without starting the TUI.
     #[arg(long, group = "inspection")]

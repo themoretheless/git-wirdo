@@ -201,16 +201,18 @@ fn workspace_listing_is_read_only_and_noninteractive() {
         .create_workspace(&workspace, "topic")
         .unwrap();
     let before = fixture.git(&["status", "--porcelain"]);
-    let output = binary()
-        .arg("--repo")
-        .arg(&fixture.path)
-        .arg("--list-workspaces")
-        .output()
-        .unwrap();
-    assert!(output.status.success());
-    let text = String::from_utf8(output.stdout).unwrap();
-    assert!(text.contains("topic") && text.contains("another checkout"));
-    assert!(!text.contains('\x1b'));
+    for flag in ["--list-worktrees", "--list-workspaces"] {
+        let output = binary()
+            .arg("--repo")
+            .arg(&fixture.path)
+            .arg(flag)
+            .output()
+            .unwrap();
+        assert!(output.status.success());
+        let text = String::from_utf8(output.stdout).unwrap();
+        assert!(text.contains("topic") && text.contains("another checkout"));
+        assert!(!text.contains('\x1b'));
+    }
     assert_eq!(fixture.git(&["status", "--porcelain"]), before);
 }
 
