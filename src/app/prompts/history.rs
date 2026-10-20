@@ -12,6 +12,7 @@ use crate::model::{ViewMode, display_path};
 pub enum HistoryPrompt {
     Interactive(crate::git::InteractiveRebase),
     ConfirmInteractive(crate::git::InteractiveRebase, String),
+    Reword(String),
     ImportPatch,
     ExportCommit(String),
     /// Create a branch at a reflog commit.
@@ -24,6 +25,28 @@ pub enum HistoryPrompt {
 impl HistoryPrompt {
     pub(super) fn submit(self, app: &mut App, v: &[String]) -> Result<Submitted> {
         Ok(match self {
+            Self::Reword(sha) => {
+                let editor = app
+                    .rebase_editor
+                    .as_mut()
+                    .context("Rebase editor is closed")?;
+                editor.plan.reword(&sha, &v[0])?;
+                let row = editor
+                    .rows
+                    .iter_mut()
+                    .find(|row| row.split_whitespace().nth(1) == Some(sha.as_str()))
+                    .context("Commit no longer present")?;
+                *row = format!(
+                    "reword {sha} # {}",
+                    v[0].lines()
+                        .next()
+                        .unwrap_or("")
+                        .escape_debug()
+                        .to_string()
+                        .replace(';', "\\u{3b}")
+                );
+                return Ok(Submitted::Done);
+            }
             Self::ConfirmInteractive(plan, todo) => {
                 ensure!(v[0] == "rebase", "Rebase cancelled");
                 app.rebase_editor = None;
@@ -34,7 +57,11 @@ impl HistoryPrompt {
                     app.refresh_detail();
                 }
                 result?;
-                "Interactive rebase completed; original HEAD retained in recovery refs".into()
+                if app.state.merge_state.rebase_in_progress {
+                    "Interactive rebase paused; amend the commit, then continue or abort".into()
+                } else {
+                    "Interactive rebase completed; original HEAD retained in recovery refs".into()
+                }
             }
             Self::Interactive(plan) => {
                 ensure!(v[1] == "rebase", "Rebase cancelled");
@@ -45,7 +72,11 @@ impl HistoryPrompt {
                     app.refresh_detail();
                 }
                 result?;
-                "Interactive rebase completed; original HEAD retained in recovery refs".into()
+                if app.state.merge_state.rebase_in_progress {
+                    "Interactive rebase paused; amend the commit, then continue or abort".into()
+                } else {
+                    "Interactive rebase completed; original HEAD retained in recovery refs".into()
+                }
             }
             Self::ImportPatch => {
                 ensure!(v[1] == "apply", "Import cancelled: type apply exactly");

@@ -115,9 +115,11 @@ impl RebaseEditor {
             let action = parts.next().unwrap_or("");
             let sha = parts.next().unwrap_or("");
             let subject = parts.next().unwrap_or("").trim_start_matches("# ");
-            if action == "pick" {
+            if matches!(action, "pick" | "edit" | "reword") {
                 count += 1;
                 result.push(format!("{count}. {subject} [{:.12}]", sha));
+            } else if action == "drop" {
+                result.push(format!("   DROP: {subject} [{:.12}]", sha));
             } else {
                 result.push(format!("   + {action}: {subject} [{:.12}]", sha));
             }
@@ -248,10 +250,25 @@ impl App {
                 editor.rows.swap(editor.cursor, editor.cursor - 1);
                 editor.cursor -= 1;
             }
-            KeyCode::Char(c @ ('p' | 's' | 'f')) => {
+            KeyCode::Char('r') => {
+                let sha = editor.rows[editor.cursor]
+                    .split_whitespace()
+                    .nth(1)
+                    .unwrap()
+                    .to_owned();
+                let message = editor.plan.message(&sha).unwrap_or("").to_owned();
+                self.start_prefilled_prompt(
+                    HistoryPrompt::Reword(sha),
+                    vec!["Replacement commit message"],
+                    vec![message],
+                );
+            }
+            KeyCode::Char(c @ ('p' | 's' | 'f' | 'e' | 'd')) => {
                 let action = match c {
                     's' => "squash",
                     'f' => "fixup",
+                    'e' => "edit",
+                    'd' => "drop",
                     _ => "pick",
                 };
                 let row = &mut editor.rows[editor.cursor];
@@ -271,8 +288,15 @@ impl App {
             KeyCode::End => editor.cursor = editor.rows.len().saturating_sub(1),
             KeyCode::Char('v') => editor.preview = !editor.preview,
             KeyCode::Enter => {
-                if !editor.rows.first().is_some_and(|r| r.starts_with("pick ")) {
-                    self.notify("First commit must use pick; press p on the first row");
+                if !editor
+                    .rows
+                    .iter()
+                    .find(|r| !r.starts_with("drop "))
+                    .is_some_and(|r| {
+                        r.starts_with("pick ") || r.starts_with("edit ") || r.starts_with("reword ")
+                    })
+                {
+                    self.notify("First retained commit must use pick, edit or reword");
                 } else {
                     let kind =
                         HistoryPrompt::ConfirmInteractive(editor.plan.clone(), editor.todo());

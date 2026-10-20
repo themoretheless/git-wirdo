@@ -942,3 +942,52 @@ fn worktree_palette_creates_from_branch_and_base_and_moves_dirty_checkout() {
     assert_eq!(support::git(&from, &["rev-parse", "HEAD"]), base);
     terminal.quit();
 }
+
+#[test]
+fn visual_reword_drop_and_edit_stop_through_terminal() {
+    let repo = TestRepo::new();
+    repo.write("base", "base");
+    repo.commit_all("base");
+    for name in ["a", "b", "c"] {
+        repo.write(name, name);
+        repo.commit_all(name);
+    }
+    let mut terminal = tui(&repo);
+    terminal.view("History");
+    terminal.key(b"j", "b");
+    terminal.key(b"j", "a");
+    terminal.key(b"j", "base");
+    terminal.key(b"~", "Interactive rebase | oldest first");
+    terminal.key(b"r", "Replacement commit message:");
+    terminal.key(b"\x15", "Replacement commit message:");
+    terminal.field("new a; literal $()", "reword");
+    terminal.key(b"j", "Interactive rebase | oldest first");
+    terminal.key(b"d", "drop");
+    terminal.key(b"j", "Interactive rebase | oldest first");
+    terminal.key(b"e", "edit");
+    terminal.key(b"v", "DROP: b");
+    terminal.key(b"\r", "Type rebase");
+    terminal.field("rebase", "Interactive rebase paused");
+    assert!(
+        repo.open()
+            .load_state()
+            .unwrap()
+            .merge_state
+            .rebase_in_progress
+    );
+    assert!(!repo.path.join("b").exists());
+    assert_eq!(
+        repo.git(&["log", "-1", "--format=%s", "HEAD~1"]).trim(),
+        "new a; literal $()"
+    );
+    terminal.key(b"e", "Continued Git operation");
+    assert!(
+        !repo
+            .open()
+            .load_state()
+            .unwrap()
+            .merge_state
+            .rebase_in_progress
+    );
+    terminal.quit();
+}

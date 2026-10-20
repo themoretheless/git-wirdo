@@ -621,7 +621,11 @@ performance, acceptance evidence and candidates for the next feature stage.
   operations. The editor renders a bounded viewport for large patches.
 - In History select the **base commit to keep**, then `~`. The visual todo lists
   subsequent commits oldest first, with abbreviated IDs and subjects. `j/k`
-  select, `J/K` move a commit, and `p/s/f` choose pick/squash/fixup. `v` previews
+  select, `J/K` move a commit, and `p/s/f` choose pick/squash/fixup. `r` edits the
+  full commit message (reword), `e` pauses at a commit for editing, and `d` explicitly
+  drops it. Dropped commits remain visible in the preview and recovery refs retain
+  the original HEAD. The first retained commit must be pick/edit/reword and at
+  least one commit must remain. `v` previews
   the resulting groups (PgUp/PgDn scroll the preview); fixup discards its message and squash combines messages.
   The preview does not predict conflicts or new commit IDs. Enter opens typed
   `rebase` confirmation; Esc returns to editing or closes the editor. These
@@ -629,8 +633,11 @@ performance, acceptance evidence and candidates for the next feature stage.
   The command palette retains **Edit raw rebase todo**, accepting full IDs and
   newline/`;` separators (native Windows paste uses `;`). The editor accepts
   1–200 commits in clean, linear, attached-branch history, always retaining every
-  commit exactly once. Original HEAD is saved in recovery refs visible through
-  Reflog. Conflicts use existing `e` continue, `K` skip and `x` abort controls.
+  commit exactly once, including explicit drops. Original HEAD is saved in recovery refs visible through
+  Reflog. Conflicts and edit stops use existing `e` continue, `K` skip and `x` abort
+  controls; amend an edit-stop commit before continuing. Reword messages survive
+  stops and a later application restart. The generated plan is limited to 24 KiB
+  for portable process-environment limits; split larger edits into multiple rebases.
 
 ### Stash selected files
 

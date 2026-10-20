@@ -267,3 +267,108 @@ fn branch_name_filter_is_unicode_aware_and_keeps_identity_on_refresh() {
     app.handle(Action::SwitchBranch);
     assert_eq!(repo.git(&["branch", "--show-current"]).trim(), "Ä-topic");
 }
+
+#[test]
+fn reword_preserves_message_bytes_and_treats_shell_syntax_as_data() {
+    let repo = TestRepo::new();
+    repo.write("base", "base");
+    repo.commit_all("base");
+    let base = repo.git(&["rev-parse", "HEAD"]);
+    repo.write("a", "a");
+    repo.commit_all("a\n\noriginal multiline body");
+    let sha = repo.git(&["rev-parse", "HEAD"]);
+    let git = repo.open();
+    let mut plan = git.prepare_interactive_rebase(base.trim()).unwrap();
+    assert!(
+        plan.message(sha.trim())
+            .unwrap()
+            .contains("original multiline body")
+    );
+    let message = "Новое имя\n\n$() `touch injected` ' \" ; # data\\n\n";
+    plan.reword(sha.trim(), message).unwrap();
+    git.run_interactive_rebase(&plan, &plan.todo.replace("pick ", "reword "))
+        .unwrap();
+    assert_eq!(
+        repo.git(&["log", "-1", "--format=%B"]).trim_end(),
+        message.trim_end()
+    );
+    assert!(!repo.path.join("injected").exists());
+    assert_eq!(repo.git(&["show", "HEAD:a"]), "a");
+    assert!(
+        repo.git(&[
+            "for-each-ref",
+            "--format=%(objectname)",
+            "refs/git-wirdo/recovery/"
+        ])
+        .contains(sha.trim())
+    );
+}
+
+#[test]
+fn reword_survives_an_edit_stop_and_drop_is_explicit_and_recoverable() {
+    let repo = TestRepo::new();
+    repo.write("base", "base");
+    repo.commit_all("base");
+    let base = repo.git(&["rev-parse", "HEAD"]);
+    for name in ["a", "b", "c"] {
+        repo.write(name, name);
+        repo.commit_all(name);
+    }
+    let original = repo.git(&["rev-parse", "HEAD"]);
+    let git = repo.open();
+    let mut plan = git.prepare_interactive_rebase(base.trim()).unwrap();
+    let rows: Vec<_> = plan.todo.lines().collect();
+    let third = rows[2].split_whitespace().nth(1).unwrap().to_owned();
+    let todo = format!(
+        "{}\n{}\n{}",
+        rows[0].replacen("pick", "edit", 1),
+        rows[1].replacen("pick", "drop", 1),
+        rows[2].replacen("pick", "reword", 1)
+    );
+    plan.reword(&third, "message after restart\n\nbody\n")
+        .unwrap();
+    git.run_interactive_rebase(&plan, &todo).unwrap();
+    assert!(git.load_state().unwrap().merge_state.rebase_in_progress);
+    // A fresh Git process (without the initial editor environment) must retain the message.
+    repo.git(&["rebase", "--continue"]);
+    assert!(!git.load_state().unwrap().merge_state.rebase_in_progress);
+    assert_eq!(
+        repo.git(&["log", "-1", "--format=%s"]).trim(),
+        "message after restart"
+    );
+    assert!(!repo.path.join("b").exists());
+    assert!(repo.path.join("a").exists() && repo.path.join("c").exists());
+    assert_eq!(
+        repo.git(&["rev-list", "--count", &format!("{}..HEAD", base.trim())])
+            .trim(),
+        "2"
+    );
+    assert!(
+        repo.git(&[
+            "for-each-ref",
+            "--format=%(objectname)",
+            "refs/git-wirdo/recovery/"
+        ])
+        .contains(original.trim())
+    );
+}
+
+#[test]
+fn rebase_rejects_all_drop_and_reword_without_a_message_before_changing_refs() {
+    let repo = TestRepo::new();
+    repo.write("base", "base");
+    repo.commit_all("base");
+    let base = repo.git(&["rev-parse", "HEAD"]);
+    repo.write("a", "a");
+    repo.commit_all("a");
+    let git = repo.open();
+    let plan = git.prepare_interactive_rebase(base.trim()).unwrap();
+    let before = repo.git(&["show-ref"]);
+    for action in ["drop", "reword", "exec"] {
+        assert!(
+            git.run_interactive_rebase(&plan, &plan.todo.replacen("pick", action, 1))
+                .is_err()
+        );
+        assert_eq!(repo.git(&["show-ref"]), before);
+    }
+}
