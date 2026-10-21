@@ -128,7 +128,7 @@ fn rebase_pull_replays_local_commit_and_dirty_work_is_preserved() {
 
 #[test]
 fn remote_removal_prompt_requires_confirmation() {
-    use crossterm::event::{KeyCode, KeyEvent, KeyModifiers};
+    use git_wirdo::keys::{KeyCode, KeyEvent, KeyModifiers};
     let repo = TestRepo::new();
     repo.open()
         .add_remote("origin", "https://example.invalid/repo.git")
@@ -161,7 +161,7 @@ fn missing_upstream_ref_is_visible_instead_of_silent_zero_counts() {
 
 #[test]
 fn pull_merge_conflict_refreshes_state_and_can_be_aborted() {
-    use crossterm::event::{KeyCode, KeyEvent, KeyModifiers};
+    use git_wirdo::keys::{KeyCode, KeyEvent, KeyModifiers};
     let writer = TestRepo::new();
     writer.write("file", "base\n");
     writer.commit_all("base");

@@ -554,11 +554,26 @@ dependencies = [
  "anyhow",
  "clap",
  "crossterm",
+ "git-wirdo-core",
  "libc",
  "portable-pty",
  "ratatui",
  "serde",
  "serde_json",
+ "vt100",
+ "windows-sys",
+]
+
+[[package]]
+name = "git-wirdo-core"
+version = "0.1.0"
+dependencies = [
+ "anyhow",
+ "crossterm",
+ "libc",
+ "serde",
+ "serde_json",
+ "unicode-width",
  "vt100",
  "windows-sys",
 ]

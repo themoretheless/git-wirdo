@@ -69,9 +69,9 @@ pub fn run(repository: Repository, state_path: Option<PathBuf>) -> Result<()> {
                 session.app.restore_navigation(navigation);
                 store = Some(loaded);
                 // Saved remote views are refreshed through the cancellable worker.
-                session.handle_key(crossterm::event::KeyEvent::new(
-                    crossterm::event::KeyCode::Char('r'),
-                    crossterm::event::KeyModifiers::NONE,
+                session.handle_key(git_wirdo::keys::KeyEvent::new(
+                    git_wirdo::keys::KeyCode::Char('r'),
+                    git_wirdo::keys::KeyModifiers::NONE,
                 ));
             }
             Err(error) => session
@@ -117,7 +117,7 @@ pub fn run(repository: Repository, state_path: Option<PathBuf>) -> Result<()> {
         }
         if event::poll(Duration::from_millis(100))? {
             match event::read()? {
-                Event::Key(key) => session.handle_key(key),
+                Event::Key(key) => session.handle_key(key.into()),
                 Event::Paste(text) => session.handle_paste(&text),
                 Event::Resize(..) => {}
                 _ => continue,

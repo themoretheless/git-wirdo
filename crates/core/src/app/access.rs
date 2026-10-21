@@ -12,6 +12,43 @@ use crate::pr_review::PrFile;
 use crate::settings::{Navigation, Store};
 
 impl App {
+    /// The line-selection editor over a hunk, while it is open.
+    pub fn line_editor(&self) -> Option<&super::editors::LineEditor> {
+        self.line_editor.as_ref()
+    }
+
+    /// The interactive-rebase plan editor, while it is open.
+    pub fn rebase_editor(&self) -> Option<&super::editors::RebaseEditor> {
+        self.rebase_editor.as_ref()
+    }
+
+    /// Paths of the files in the selected stash.
+    pub fn stash_files(&self) -> &std::collections::HashSet<std::path::PathBuf> {
+        &self.stash_files
+    }
+
+    /// Whether the in-pane search box is being typed into.
+    pub fn searching(&self) -> bool {
+        self.searching
+    }
+
+    /// The in-pane search text.
+    pub fn search(&self) -> &str {
+        &self.search
+    }
+
+    pub fn palette_selection(&self) -> usize {
+        self.palette_selection
+    }
+
+    pub fn remote_branches(&self) -> &Listed<String> {
+        &self.remote_branches
+    }
+
+    pub fn github_repositories(&self) -> &Listed<crate::github::GitHubRepo> {
+        &self.github_repositories
+    }
+
     /// Whether another tool changed the repository since the last reload. Views backed by
     /// GitHub are skipped: reloading them costs network calls that a local edit never needs.
     pub fn changed_externally(&self) -> bool {
@@ -229,6 +266,14 @@ impl App {
     }
 
     /// Choose the pull request whose files the PrFiles view reviews.
+    /// Files of the PR under review, as loaded from GitHub; the cursor returns to the first.
+    pub fn set_pr_files(&mut self, files: Vec<PrFile>) {
+        self.pr_files = Listed {
+            items: files,
+            selection: 0,
+        };
+    }
+
     pub fn set_review_pr(&mut self, pr: PullRequest) {
         self.review_pr = Some(pr);
     }

@@ -1,5 +1,5 @@
 //! Terminal rendering of an `App` snapshot: header, list, detail pane, footer, palette.
-use crate::model::terminal_text as safe_text;
+use git_wirdo_core::model::printable_text as safe_text;
 use ratatui::Frame;
 use ratatui::layout::{Constraint, Direction, Layout, Rect};
 use ratatui::style::{Color, Style};
@@ -62,12 +62,12 @@ impl Ui {
             .areas(body);
 
         render_header(frame, header, app);
-        if app.line_editor.is_none() && app.rebase_editor.is_none() {
+        if app.line_editor().is_none() && app.rebase_editor().is_none() {
             self.render_list(frame, list, app);
             render_detail(frame, detail, app, &mut self.detail);
         }
         render_footer(frame, footer, app);
-        if let Some(editor) = &app.line_editor {
+        if let Some(editor) = app.line_editor() {
             let (rows, cursor) = editor.rows(usize::from(body.height.saturating_sub(2)));
             frame.render_widget(Clear, body);
             let items = rows
@@ -86,7 +86,7 @@ impl Ui {
             self.line_editor.select(Some(cursor));
             frame.render_stateful_widget(widget, body, &mut self.line_editor);
         }
-        if let Some(editor) = &app.rebase_editor {
+        if let Some(editor) = app.rebase_editor() {
             frame.render_widget(Clear, body);
             let [todo, preview] = Layout::default()
                 .direction(Direction::Horizontal)
@@ -135,7 +135,7 @@ impl Ui {
                 );
             }
         }
-        if let Some(prompt) = &app.prompt
+        if let Some(prompt) = &app.prompt()
             && matches!(prompt.kind, PromptKind::CommandPalette)
         {
             render_palette(frame, app, &prompt.text);
@@ -158,7 +158,7 @@ impl Ui {
                     },
                 ))
                 .highlight_symbol("> ");
-        let state = &mut self.lists[app.view.index()];
+        let state = &mut self.lists[app.view().index()];
         let selection = if !app.name_filter().is_empty() {
             app.visible_indices()
                 .iter()
@@ -172,93 +172,92 @@ impl Ui {
 }
 
 fn render_header(frame: &mut Frame<'_>, area: Rect, app: &App) {
-    let tracking = if let Some(error) = &app.tracking.error {
+    let tracking = if let Some(error) = &app.tracking().error {
         format!(
             "Branch: {} | Tracking unavailable: {}",
-            safe_text(&app.state.branch),
+            safe_text(&app.state().branch),
             safe_text(error)
         )
     } else {
         format!(
             "Branch: {} | {} +{} -{}",
-            safe_text(&app.state.branch),
-            safe_text(app.tracking.upstream.as_deref().unwrap_or("no upstream")),
-            app.tracking.ahead,
-            app.tracking.behind
+            safe_text(&app.state().branch),
+            safe_text(app.tracking().upstream.as_deref().unwrap_or("no upstream")),
+            app.tracking().ahead,
+            app.tracking().behind
         )
     };
     let header = Paragraph::new(vec![
         Line::from(Span::styled("Git Wirdo", Style::default().fg(Color::Cyan))),
-        Line::from(format!("Repo: {}", display_path(app.repository.root()))),
+        Line::from(format!("Repo: {}", display_path(app.repository().root()))),
         Line::from(tracking),
-        Line::from(format!("View: {:?}", app.view)),
-        Line::from(app.state.merge_state.summary().replace('\n', " | ")),
+        Line::from(format!("View: {:?}", app.view())),
+        Line::from(app.state().merge_state.summary().replace('\n', " | ")),
     ])
     .block(Block::default().borders(Borders::ALL).title("Status"));
     frame.render_widget(header, area);
 }
 
 fn render_detail(frame: &mut Frame<'_>, area: Rect, app: &App, cache: &mut DetailCache) {
-    let title = if app.view == ViewMode::Files {
+    let title = if app.view() == ViewMode::Files {
         let files = app.displayed_files();
         format!(
             "{} | Seen {}/{} | Stash selected {}",
-            if app.browse_tracked {
+            if app.browse_tracked() {
                 "Tracked files (read-only)"
-            } else if app.upstream_comparison {
+            } else if app.upstream_comparison() {
                 "Upstream"
             } else {
                 "Working changes"
             },
             files.iter().filter(|file| app.file_seen(file)).count(),
             files.len(),
-            app.stash_files.len()
+            app.stash_files().len()
         )
     } else {
         "Details".into()
     };
-    let detail = Paragraph::new(cache.rendered(&app.detail_text))
+    let detail = Paragraph::new(cache.rendered(app.detail_text()))
         .block(Block::default().borders(Borders::ALL).title(title))
-        .scroll((app.detail_scroll, app.detail_column));
+        .scroll((app.detail_scroll(), app.detail_column()));
     frame.render_widget(detail, area);
 }
 
 fn render_footer(frame: &mut Frame<'_>, area: Rect, app: &App) {
-    let input = if let Some(prompt) = &app.prompt {
+    let input = if let Some(prompt) = &app.prompt() {
         format!(
             "{}: {}_ (Enter next, Esc cancel)",
             prompt.labels[prompt.values.len()],
             safe_text(&prompt.text).replace('\n', "↵")
         )
-    } else if app.line_editor.is_some() {
+    } else if app.line_editor().is_some() {
         "Select lines: j/k move | PgUp/Dn, Home/End jump | Space toggle | v range | s stage | u unstage | Esc cancel".into()
-    } else if app.rebase_editor.is_some() {
+    } else if app.rebase_editor().is_some() {
         "Rebase: j/k select | J/K reorder | p/s/f actions | r reword | e edit | d drop | v preview | PgUp/Dn preview | Enter confirm | Esc cancel".into()
-    } else if app.searching {
+    } else if app.searching() {
         format!(
             "Find: {}_ (Enter search, Esc cancel)",
-            safe_text(&app.search)
+            safe_text(app.search())
         )
     } else {
         " : commands | tab view | I recent | j/k select | PgUp/PgDn diff | / find | n next | d base | v seen | r refresh | q quit".into()
     };
     let settings = app
-        .persistence_error
-        .as_ref()
+        .persistence_error()
         .map(|error| format!(" | Settings: {}", safe_text(error).replace('\n', " | ")))
         .unwrap_or_default();
-    let message_style = if app.message_is_error {
+    let message_style = if app.message_is_error() {
         Style::default().fg(Color::Red)
     } else {
         Style::default()
     };
     let footer = Paragraph::new(vec![
         Line::from(input),
-        Line::from(shortcuts(app.view)),
+        Line::from(shortcuts(app.view())),
         Line::from(Span::styled(
             format!(
                 "Action: {}{settings}",
-                safe_text(&app.message).replace('\n', " | ")
+                safe_text(app.message()).replace('\n', " | ")
             ),
             message_style,
         )),
@@ -276,7 +275,7 @@ fn render_palette(frame: &mut Frame<'_>, app: &App, query: &str) {
         area.height.saturating_sub(4),
     );
     frame.render_widget(Clear, panel);
-    let entries = crate::commands::filtered(app.view, query);
+    let entries = crate::commands::filtered(app.view(), query);
     let items: Vec<ListItem> = if entries.is_empty() {
         vec![ListItem::new("No matching commands")]
     } else {
@@ -292,8 +291,8 @@ fn render_palette(frame: &mut Frame<'_>, app: &App, query: &str) {
         )))
         .highlight_style(Style::default().fg(Color::Yellow))
         .highlight_symbol("> ");
-    let mut selection =
-        ListState::default().with_selected((!entries.is_empty()).then_some(app.palette_selection));
+    let mut selection = ListState::default()
+        .with_selected((!entries.is_empty()).then_some(app.palette_selection()));
     frame.render_stateful_widget(list, panel, &mut selection);
 }
 
@@ -335,9 +334,9 @@ fn shortcuts(view: ViewMode) -> &'static str {
 }
 
 fn list_items(app: &App) -> (Vec<ListItem<'static>>, bool) {
-    let (lines, empty): (Vec<String>, &str) = match app.view {
+    let (lines, empty): (Vec<String>, &str) = match app.view() {
         ViewMode::RecentRepositories => (
-            app.navigation
+            app.navigation()
                 .repositories
                 .iter()
                 .map(|settings| {
@@ -351,7 +350,7 @@ fn list_items(app: &App) -> (Vec<ListItem<'static>>, bool) {
             "No recent repositories",
         ),
         ViewMode::Hunks => (
-            app.hunks
+            app.hunks()
                 .items
                 .iter()
                 .enumerate()
@@ -367,7 +366,7 @@ fn list_items(app: &App) -> (Vec<ListItem<'static>>, bool) {
             "No text hunks",
         ),
         ViewMode::Tags => (
-            app.tags
+            app.tags()
                 .items
                 .iter()
                 .map(|t| format!("{} [{}] {}", t.name, t.kind, t.subject))
@@ -375,12 +374,12 @@ fn list_items(app: &App) -> (Vec<ListItem<'static>>, bool) {
             "No tags",
         ),
         ViewMode::Remotes => (
-            app.remotes.items.iter().map(|r| r.name.clone()).collect(),
+            app.remotes().items.iter().map(|r| r.name.clone()).collect(),
             "No remotes",
         ),
-        ViewMode::RemoteBranches => (app.remote_branches.items.clone(), "No remote branches"),
+        ViewMode::RemoteBranches => (app.remote_branches().items.clone(), "No remote branches"),
         ViewMode::Stashes => (
-            app.stashes
+            app.stashes()
                 .items
                 .iter()
                 .map(|s| format!("{} {}", s.selector, s.subject))
@@ -388,7 +387,7 @@ fn list_items(app: &App) -> (Vec<ListItem<'static>>, bool) {
             "No stashes",
         ),
         ViewMode::GitHubRepositories => (
-            app.github_repositories
+            app.github_repositories()
                 .items
                 .iter()
                 .map(|r| r.name_with_owner.clone())
@@ -396,7 +395,7 @@ fn list_items(app: &App) -> (Vec<ListItem<'static>>, bool) {
             "No repositories",
         ),
         ViewMode::Worktrees => (
-            app.workspaces
+            app.workspaces()
                 .items
                 .iter()
                 .map(|w| {
@@ -411,7 +410,7 @@ fn list_items(app: &App) -> (Vec<ListItem<'static>>, bool) {
             "No worktrees",
         ),
         ViewMode::PrFiles => (
-            app.pr_files
+            app.pr_files()
                 .items
                 .iter()
                 .map(|file| format!("{} {}", file.status, file.filename.escape_debug()))
@@ -419,7 +418,7 @@ fn list_items(app: &App) -> (Vec<ListItem<'static>>, bool) {
             "No PR files loaded",
         ),
         ViewMode::PullRequests => (
-            app.pull_requests
+            app.pull_requests()
                 .items
                 .iter()
                 .map(|pr| {
@@ -445,7 +444,7 @@ fn list_items(app: &App) -> (Vec<ListItem<'static>>, bool) {
                     };
                     format!(
                         "{}[{marker}] [{}] {}{}",
-                        if app.stash_files.contains(&file.path) {
+                        if app.stash_files().contains(&file.path) {
                             "[x] "
                         } else {
                             ""
@@ -459,7 +458,7 @@ fn list_items(app: &App) -> (Vec<ListItem<'static>>, bool) {
             "No changes",
         ),
         ViewMode::Reflog => (
-            app.reflog
+            app.reflog()
                 .items
                 .iter()
                 .map(|e| {
@@ -479,7 +478,7 @@ fn list_items(app: &App) -> (Vec<ListItem<'static>>, bool) {
             "No reflog entries",
         ),
         ViewMode::History => (
-            app.state
+            app.state()
                 .commits
                 .iter()
                 .map(|commit| {
@@ -492,7 +491,7 @@ fn list_items(app: &App) -> (Vec<ListItem<'static>>, bool) {
             "No commits",
         ),
         ViewMode::Branches => (
-            app.state
+            app.state()
                 .branches
                 .iter()
                 .map(|branch| format!("{} {}", if branch.current { "*" } else { " " }, branch.name))
@@ -500,7 +499,7 @@ fn list_items(app: &App) -> (Vec<ListItem<'static>>, bool) {
             "No branches",
         ),
         ViewMode::Conflicts => (
-            app.state
+            app.state()
                 .merge_state
                 .conflicts
                 .iter()

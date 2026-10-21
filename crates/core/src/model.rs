@@ -241,8 +241,9 @@ pub struct ReflogEntry {
     pub subject: String,
 }
 
-/// Escape terminal control sequences without changing ordinary Unicode text.
-pub(crate) fn terminal_text(text: &str) -> String {
+/// Escape control characters without changing ordinary Unicode text, so Git output can be
+/// shown verbatim by any front end without driving a terminal or breaking a layout.
+pub fn printable_text(text: &str) -> String {
     let mut result = String::with_capacity(text.len());
     for character in text.chars() {
         if character.is_control() && !matches!(character, '\n' | '\t') {

@@ -1,5 +1,5 @@
 mod support;
-use crossterm::event::{KeyCode, KeyEvent, KeyModifiers};
+use git_wirdo::keys::{KeyCode, KeyEvent, KeyModifiers};
 use git_wirdo::{
     app::App,
     process::{Control, controlled, output},

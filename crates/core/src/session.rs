@@ -1,10 +1,10 @@
 //! One serialized background task owns mutations; the terminal renders a stable snapshot.
+use crate::keys::{KeyCode, KeyEvent, KeyEventKind, KeyModifiers};
 use crate::{
     app::{Action, App},
     input::action_for_key,
     process::{Control, controlled},
 };
-use crossterm::event::{KeyCode, KeyEvent, KeyEventKind, KeyModifiers};
 use std::sync::{
     Arc,
     atomic::{AtomicBool, Ordering},
@@ -227,7 +227,7 @@ impl Session {
             {
                 return false;
             }
-            return key.modifiers == crossterm::event::KeyModifiers::ALT
+            return key.modifiers == crate::keys::KeyModifiers::ALT
                 || key.code != KeyCode::Enter
                 || prompt.values.len() + 1 < prompt.labels.len();
         }
@@ -285,7 +285,7 @@ mod tests {
         );
         session.handle_key(KeyEvent::new(
             KeyCode::Char('s'),
-            crossterm::event::KeyModifiers::NONE,
+            crate::keys::KeyModifiers::NONE,
         ));
         assert!(
             !session.busy(),
@@ -301,7 +301,7 @@ mod tests {
         );
         session.handle_key(KeyEvent::new(
             KeyCode::Char('r'),
-            crossterm::event::KeyModifiers::NONE,
+            crate::keys::KeyModifiers::NONE,
         ));
         let deadline = Instant::now() + std::time::Duration::from_secs(10);
         while session.busy() {
@@ -312,7 +312,7 @@ mod tests {
         assert!(!session.app.message_is_error, "{}", session.app.message);
         session.handle_key(KeyEvent::new(
             KeyCode::Char('s'),
-            crossterm::event::KeyModifiers::NONE,
+            crate::keys::KeyModifiers::NONE,
         ));
         while session.busy() {
             assert!(Instant::now() < deadline);

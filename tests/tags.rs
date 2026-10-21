@@ -100,7 +100,7 @@ fn publication_is_selective_and_remote_delete_rejects_changed_tag() {
 
 #[test]
 fn tag_dialog_requires_confirmed_local_deletion() {
-    use crossterm::event::{KeyCode, KeyEvent, KeyModifiers};
+    use git_wirdo::keys::{KeyCode, KeyEvent, KeyModifiers};
     let repo = TestRepo::new();
     repo.write("file", "base");
     repo.commit_all("base");

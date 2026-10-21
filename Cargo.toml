@@ -3,24 +3,30 @@ name = "git-wirdo"
 version = "0.1.0"
 edition = "2024"
 
+[workspace]
+members = [".", "crates/core"]
+# Plain `cargo test` / `cargo clippy` at the root cover the library as well as the TUI.
+default-members = [".", "crates/core"]
+
 [dependencies]
 anyhow = "1.0.104"
 clap = { version = "4.6.5", features = ["derive"] }
 crossterm = "0.29.0"
+git-wirdo-core = { path = "crates/core", features = ["crossterm"] }
 ratatui = "0.30.2"
 serde = { version = "1.0.229", features = ["derive"] }
 serde_json = "1.0.151"
 
-[target.'cfg(unix)'.dependencies]
+# The PTY and process tests drive the platform APIs directly.
+[target.'cfg(unix)'.dev-dependencies]
 libc = "0.2.189"
-
-[target.'cfg(windows)'.dependencies]
-windows-sys = { version = "0.61.2", features = ["Win32_Foundation", "Win32_Security", "Win32_System_Threading", "Win32_System_Console", "Win32_System_JobObjects", "Win32_System_Diagnostics_ToolHelp"] }
 
 [target.'cfg(windows)'.dev-dependencies]
 portable-pty = "0.9.0"
+windows-sys = { version = "0.61.2", features = ["Win32_Foundation", "Win32_Security", "Win32_System_Threading", "Win32_System_Console", "Win32_System_JobObjects", "Win32_System_Diagnostics_ToolHelp"] }
 
 [dev-dependencies]
+git-wirdo-core = { path = "crates/core", features = ["crossterm", "mock-gh"] }
 vt100 = "0.16.2"
 
 # Smaller, faster release binary. Symbol names are kept so panic backtraces stay

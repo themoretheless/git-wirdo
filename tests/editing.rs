@@ -1,6 +1,6 @@
 mod support;
-use crossterm::event::{KeyCode, KeyEvent, KeyModifiers};
 use git_wirdo::app::{Action, App};
+use git_wirdo::keys::{KeyCode, KeyEvent, KeyModifiers};
 use support::TestRepo;
 
 #[test]

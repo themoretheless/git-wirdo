@@ -176,24 +176,31 @@ Background tasks keep the terminal responsive while Git runs.
 
 ## Code layout
 
-- `src/patch.rs` — exact-byte hunk separation for selective staging
-- `src/git/` — repository discovery and the `GitRunner` seam (`mod.rs`), with Git operations
-  split by domain: worktrees, working-tree files, history, branches, stashes, tags, remotes
-- `src/model.rs` — repository data and display-safe path labels
-- `src/app/mod.rs` — application state, selections, refresh, and error handling
-- `src/app/access.rs` — the public read accessors and named commands; fields stay crate-private
-- `src/app/actions.rs` — action dispatch: the current view claims an action first, then global ones
-- `src/app/keys.rs` — key and paste handling for prompts, search and the palette
-- `src/app/prompts/` — multi-field forms grouped by domain, typed confirmations, one reload per submission
-- `src/app/detail.rs` — detail pane contents and in-pane search
-- `src/commands.rs` — searchable command palette entries per view
-- `src/github.rs`, `src/pr_review.rs` — GitHub CLI transport, PR lifecycle, and inline review
-- `src/process.rs`, `src/session.rs` — cancellable background tasks and the serialized worker
-- `src/settings.rs` — persisted navigation state with locked, atomic merges
-- `src/input.rs` — terminal key events mapped to application actions
-- `src/ui.rs` — Ratatui rendering and list scroll state
-- `src/terminal.rs` — terminal lifecycle and event loop
-- `src/main.rs` — CLI and headless output
+The repository is a Cargo workspace with two crates.
+
+**`crates/core` (`git-wirdo-core`)** holds all behaviour and has no terminal or GUI
+dependency. A front end only turns its input into `keys::KeyEvent`s (the optional
+`crossterm` feature converts crossterm events) and draws what `App` exposes:
+
+- `app/` — the interactive state machine: views, selections, prompts, editors and actions
+  (`access.rs` is its public read and command API; fields stay crate-private)
+- `session.rs` — the serialized background worker that runs actions off the UI thread
+- `input.rs`, `keys.rs` — key events and the default key map to actions
+- `commands.rs` — searchable command palette entries per view
+- `git/` — repository discovery and the `GitRunner` seam, with Git operations split by
+  domain: worktrees, working-tree files, history, branches, stashes, tags, remotes
+- `model.rs` — repository data, display-safe paths and printable text
+- `patch.rs` — exact-byte hunk separation for selective staging
+- `github.rs`, `pr_review.rs` — GitHub CLI transport, PR lifecycle, and inline review
+- `process.rs` — cancellable child processes with progress
+- `settings.rs` — persisted navigation state with locked, atomic merges
+
+**The root crate (`git-wirdo`)** is the terminal client: `src/ui.rs` renders with
+Ratatui, `src/terminal.rs` owns the terminal lifecycle and event loop, `src/welcome.rs`
+is the start screen and `src/main.rs` the CLI and headless output. It re-exports the
+core modules, so `git_wirdo::app` and `git_wirdo::git` keep working.
+
+`cargo test` and `cargo clippy` at the root cover both crates.
 
 ## Development
 
