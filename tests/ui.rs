@@ -60,14 +60,14 @@ fn header_and_action_message_fit_inside_their_borders() {
     assert!(rendered.contains("Action: Ready"));
     app.handle(Action::Commit);
     for c in "empty commit".chars() {
-        app.handle_key(crossterm::event::KeyEvent::new(
-            crossterm::event::KeyCode::Char(c),
-            crossterm::event::KeyModifiers::NONE,
+        app.handle_key(git_wirdo::keys::KeyEvent::new(
+            git_wirdo::keys::KeyCode::Char(c),
+            git_wirdo::keys::KeyModifiers::NONE,
         ));
     }
-    app.handle_key(crossterm::event::KeyEvent::new(
-        crossterm::event::KeyCode::Enter,
-        crossterm::event::KeyModifiers::NONE,
+    app.handle_key(git_wirdo::keys::KeyEvent::new(
+        git_wirdo::keys::KeyCode::Enter,
+        git_wirdo::keys::KeyModifiers::NONE,
     ));
     let rendered = screen(&app, 120, 24);
     assert!(rendered.contains("Action: Git failed"));
@@ -247,7 +247,7 @@ fn multiline_paste_is_input_text_and_large_paste_is_rejected_without_truncation(
 
 #[test]
 fn visual_line_cursor_stays_visible_in_large_diff_and_narrow_window() {
-    use crossterm::event::{KeyCode, KeyEvent, KeyModifiers};
+    use git_wirdo::keys::{KeyCode, KeyEvent, KeyModifiers};
     let repo = TestRepo::new();
     let base = (0..10000).map(|i| format!("old {i}\n")).collect::<String>();
     let changed = (0..10000)
@@ -270,7 +270,7 @@ fn visual_line_cursor_stays_visible_in_large_diff_and_narrow_window() {
 
 #[test]
 fn long_rebase_preview_can_scroll_to_the_final_commit_groups() {
-    use crossterm::event::{KeyCode, KeyEvent, KeyModifiers};
+    use git_wirdo::keys::{KeyCode, KeyEvent, KeyModifiers};
     let repo = TestRepo::new();
     repo.write("file", "base");
     repo.commit_all("base");

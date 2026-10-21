@@ -89,8 +89,8 @@ fn untracked_symlink_discard_does_not_touch_its_target() {
 
 #[test]
 fn discard_prompt_can_be_cancelled_and_never_acts_in_upstream_view() {
-    use crossterm::event::{KeyCode, KeyEvent, KeyModifiers};
     use git_wirdo::app::{Action, App};
+    use git_wirdo::keys::{KeyCode, KeyEvent, KeyModifiers};
     let repo = TestRepo::new();
     repo.write("file", "base");
     repo.commit_all("base");

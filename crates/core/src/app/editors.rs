@@ -1,11 +1,11 @@
 //! Transient UI editors. Git mutations still run through guarded repository methods.
 use super::{Action, App, HistoryPrompt, PromptKind};
+use crate::keys::{KeyCode, KeyEvent, KeyModifiers};
 use crate::{git::InteractiveRebase, model::ViewMode, patch::Hunk};
-use crossterm::event::{KeyCode, KeyEvent, KeyModifiers};
 use std::collections::BTreeSet;
 
 #[derive(Debug, Clone)]
-pub(crate) struct LineEditor {
+pub struct LineEditor {
     pub hunk: Hunk,
     pub cursor: usize,
     pub selected: BTreeSet<usize>,
@@ -72,7 +72,7 @@ impl LineEditor {
 }
 
 #[derive(Debug, Clone)]
-pub(crate) struct RebaseEditor {
+pub struct RebaseEditor {
     pub plan: InteractiveRebase,
     pub rows: Vec<String>,
     pub cursor: usize,

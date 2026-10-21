@@ -5,14 +5,12 @@
 mod access;
 mod actions;
 mod detail;
-pub(crate) mod editors;
+pub mod editors;
 #[cfg(test)]
 mod github_tests;
 mod keys;
 mod prompts;
 mod selection;
-#[cfg(test)]
-mod tests;
 
 pub use actions::Action;
 pub use prompts::{

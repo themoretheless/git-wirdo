@@ -7,14 +7,22 @@ description = "Git, GitHub and settings logic for git-wirdo, independent of any 
 [features]
 # Lets dependent crates script `gh` responses in their own tests; never enabled in release.
 mock-gh = []
+# Converts crossterm key events into `keys::KeyEvent` for terminal front ends.
+crossterm = ["dep:crossterm"]
 
 [dependencies]
 anyhow = "1.0.104"
 serde = { version = "1.0.229", features = ["derive"] }
 serde_json = "1.0.151"
+unicode-width = "0.2.2"
+crossterm = { version = "0.29.0", optional = true }
 
 [target.'cfg(unix)'.dependencies]
 libc = "0.2.189"
 
 [target.'cfg(windows)'.dependencies]
 windows-sys = { version = "0.61.2", features = ["Win32_Foundation", "Win32_Security", "Win32_System_Threading", "Win32_System_Console", "Win32_System_JobObjects", "Win32_System_Diagnostics_ToolHelp"] }
+
+[dev-dependencies]
+# The shared test support also carries the PTY fixture used by the terminal tests.
+vt100 = "0.16.2"

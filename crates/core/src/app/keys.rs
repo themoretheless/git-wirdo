@@ -1,5 +1,5 @@
 //! Raw key and paste events: prompt editing, search input, and dispatch to actions.
-use crossterm::event::{KeyCode, KeyEvent, KeyEventKind, KeyModifiers};
+use crate::keys::{KeyCode, KeyEvent, KeyEventKind, KeyModifiers};
 
 use super::{App, PromptKind};
 use crate::model::ViewMode;

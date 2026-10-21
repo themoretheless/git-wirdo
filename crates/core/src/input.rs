@@ -1,4 +1,4 @@
-use crossterm::event::{KeyCode, KeyEvent, KeyEventKind, KeyModifiers};
+use crate::keys::{KeyCode, KeyEvent, KeyEventKind, KeyModifiers};
 
 use crate::app::Action;
 

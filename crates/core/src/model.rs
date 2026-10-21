@@ -240,3 +240,17 @@ pub struct ReflogEntry {
     pub selector: String,
     pub subject: String,
 }
+
+/// Escape control characters without changing ordinary Unicode text, so Git output can be
+/// shown verbatim by any front end without driving a terminal or breaking a layout.
+pub fn printable_text(text: &str) -> String {
+    let mut result = String::with_capacity(text.len());
+    for character in text.chars() {
+        if character.is_control() && !matches!(character, '\n' | '\t') {
+            result.extend(character.escape_default());
+        } else {
+            result.push(character);
+        }
+    }
+    result
+}

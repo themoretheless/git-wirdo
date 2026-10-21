@@ -569,9 +569,12 @@ name = "git-wirdo-core"
 version = "0.1.0"
 dependencies = [
  "anyhow",
+ "crossterm",
  "libc",
  "serde",
  "serde_json",
+ "unicode-width",
+ "vt100",
  "windows-sys",
 ]
 

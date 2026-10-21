@@ -1,6 +1,7 @@
 //! Actions are UI-independent commands; `apply` is the one place that decides what
 //! each means in the current view.
 use anyhow::Result;
+use unicode_width::UnicodeWidthStr;
 
 use super::prompts::{
     BranchPrompt, GitHubPrompt, HistoryPrompt, RemotePrompt, RepositoryPrompt, StashPrompt,
@@ -862,7 +863,7 @@ impl App {
                 self.detail_column = self.detail_column.saturating_add(10).min(
                     self.detail_text
                         .lines()
-                        .map(|line| ratatui::text::Line::from(crate::ui::safe_text(line)).width())
+                        .map(|line| crate::model::printable_text(line).width())
                         .max()
                         .unwrap_or(0)
                         .min(u16::MAX as usize) as u16,
