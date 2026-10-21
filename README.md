@@ -58,7 +58,7 @@ git-wirdo --repo /path/to/repo
 
 | Key | View | Action |
 | --- | --- | --- |
-| `Tab` | Any | Cycle views (including workspaces, PRs, stashes and remotes) |
+| `Tab` | Any | Cycle views (including worktrees, PRs, stashes and remotes) |
 | `j` / `k`, `↓` / `↑` | Any | Move the selection; the list follows it |
 | `r` | Any | Refresh repository state and the detail pane; local views also reload by themselves within about two seconds after another tool edits, stages, commits or switches branches |
 | `PageUp` / `PageDown` | Any | Scroll details by ten lines |
@@ -288,20 +288,36 @@ replaced or automatically removed. Git operation cancellation remains available
 while generating the patch; writing the completed output is a synchronous local
 file write. Exports do not send email or publish anything remotely.
 
-## Workspaces and GitHub
+## Worktrees and GitHub
 
-Tab cycles Files → History → Branches → Conflicts → Workspaces → PullRequests →
+Tab cycles Files → History → Branches → Conflicts → Worktrees → PullRequests →
 GitHubRepositories → Stashes → Remotes → RemoteBranches → Tags → Hunks → Reflog → PrFiles → RecentRepositories. `O` opens another local repository by path; the previous
 checkout and its files remain on disk. Relative paths are resolved from the
-current repository root. Workspaces are Git linked worktrees, not cloud sessions. Listing uses the
+current repository root. Worktrees are Git linked working directories. Listing uses the
 [NUL-delimited porcelain format](https://git-scm.com/docs/git-worktree/2.36.0),
 so Git 2.36 or newer is required.
 
-In Workspaces, `Enter` opens the selected checkout. `N` asks for a new directory
+In Worktrees, `Enter` opens the selected checkout. `N` asks for a new directory
 and new branch name, then creates a worktree from the current HEAD. `D` asks you
 to type `remove` before removing the selected worktree. The current checkout,
-primary checkout, dirty and locked worktrees cannot be removed. Branches are
-retained, including their unique commits; removal never uses force.
+primary checkout, dirty and locked worktrees cannot be removed. Ignored files,
+assume-unchanged/skip-worktree entries and unfinished Git operations also block
+removal. Confirmation captures the branch, HEAD and Git directory and rejects
+changed targets before removal. Branches are
+retained, including their unique commits; removal never uses force. A detached
+worktree's HEAD is saved in persistent recovery refs before removal and is visible
+through Reflog, including after reflog expiration or garbage collection.
+
+The command palette in Worktrees also offers **Create worktree for existing
+branch**, **Create worktree from commit or ref**, **Lock selected worktree**,
+**Unlock selected worktree**, and **Move selected worktree**. Creating for an
+existing branch never forces a branch already checked out elsewhere. Explicit
+bases resolve to a commit before creation. Moving preserves staged, unstaged and
+untracked files; current, primary and locked trees and trees with unfinished Git
+operations cannot be moved. Removal and
+move confirmations reject stale target identities. Old recent paths remain in
+Recents until forgotten; open a moved tree at its new path. Branch details show
+the path of an already checked-out branch. Existing shortcuts are unchanged.
 
 `I` opens RecentRepositories: up to 50 recently opened repository/worktree roots,
 most recent first. Enter opens the selected root, retaining unsaved work in both
@@ -402,7 +418,7 @@ line-numbered patches; `--list-prs` accepts `--pr-state`, `--pr-search`, and
 Read-only CLI output is also available without an interactive terminal:
 
 ```bash
-git-wirdo --list-workspaces
+git-wirdo --list-worktrees # --list-workspaces remains supported
 git-wirdo --list-prs
 git-wirdo --pr 123
 git-wirdo --list-github-repos
@@ -510,10 +526,10 @@ Before every reset, the previous HEAD is saved in a persistent local
 committed history from garbage collection; it does **not** save discarded
 uncommitted changes. No force push is performed.
 
-Reflog shows the current workspace's HEAD movements and persistent pre-reset references, including commits no longer
+Reflog shows the current worktree's HEAD movements and persistent pre-reset references, including commits no longer
 on a branch. `+` loads older entries. `N` creates a new named branch at the
 selected immutable commit ID without switching checkout or touching local edits.
-Existing branches cannot be overwritten. `--list-reflog` lists the first 100 HEAD entries plus up to 100 recovery references without starting the terminal UI. Linked workspaces have separate HEAD
+Existing branches cannot be overwritten. `--list-reflog` lists the first 100 HEAD entries plus up to 100 recovery references without starting the terminal UI. Linked worktrees have separate HEAD
 reflogs; Git's configured reflog expiration still applies.
 
 
@@ -620,16 +636,24 @@ performance, acceptance evidence and candidates for the next feature stage.
   operations. The editor renders a bounded viewport for large patches.
 - In History select the **base commit to keep**, then `~`. The visual todo lists
   subsequent commits oldest first, with abbreviated IDs and subjects. `j/k`
-  select, `J/K` move a commit, and `p/s/f` choose pick/squash/fixup. `v` previews
+  select, `J/K` move a commit, and `p/s/f` choose pick/squash/fixup. `r` edits the
+  full commit message (reword), `e` pauses at a commit for editing, and `d` explicitly
+  drops it. Dropped commits remain visible in the preview and recovery refs retain
+  the original HEAD. The first retained commit must be pick/edit/reword and at
+  least one commit must remain. `v` previews
   the resulting groups (PgUp/PgDn scroll the preview); fixup discards its message and squash combines messages.
   The preview does not predict conflicts or new commit IDs. Enter opens typed
   `rebase` confirmation; Esc returns to editing or closes the editor. These
   controls work through native Windows input without multiline paste.
   The command palette retains **Edit raw rebase todo**, accepting full IDs and
   newline/`;` separators (native Windows paste uses `;`). The editor accepts
-  1–200 commits in clean, linear, attached-branch history, always retaining every
-  commit exactly once. Original HEAD is saved in recovery refs visible through
-  Reflog. Conflicts use existing `e` continue, `K` skip and `x` abort controls.
+  1–200 commits in clean, linear, attached-branch history, always listing every
+  prepared commit exactly once, including explicit drop actions. Original HEAD is
+  saved in recovery refs visible through
+  Reflog. Conflicts and edit stops use existing `e` continue, `K` skip and `x` abort
+  controls; amend an edit-stop commit before continuing. Reword messages survive
+  stops and a later application restart. The generated plan is limited to 24 KiB
+  for portable process-environment limits; split larger edits into multiple rebases.
 
 ### Stash selected files
 

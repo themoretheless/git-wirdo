@@ -37,7 +37,7 @@ impl App {
                 None => Ok("No stashes. S saves tracked and untracked changes.".into()),
             },
             ViewMode::GitHubRepositories => Ok(self.github_repositories.selected().map(|r| format!("{}\n{}\nPrivate: {}\nEnter clone and open", r.name_with_owner, r.url, r.is_private)).unwrap_or_else(|| "No GitHub repositories".into())),
-            ViewMode::Workspaces => Ok(self.workspaces.selected().map(|w| format!("{}\nBranch: {}\nLocked: {}\nEnter open | N create | D remove", display_path(&w.path), w.branch, w.locked)).unwrap_or_else(|| "No workspace".into())),
+            ViewMode::Worktrees => Ok(self.workspaces.selected().map(|w| format!("{}\nBranch: {}\nLocked: {}\nEnter open | N create | D remove", display_path(&w.path), w.branch, w.locked)).unwrap_or_else(|| "No worktree".into())),
             ViewMode::PullRequests => match self.pull_requests.selected() {
                 Some(pr) => Ok(format!("{}\n{}", crate::github::detail(self.repository.root(), pr.number)?, crate::pr_review::comments(self.repository.root(), pr.number)?)),
                 None => Ok("No open pull requests. N creates a draft PR; authenticate with gh auth login outside the TUI.".into()),
@@ -65,14 +65,20 @@ impl App {
                 Some(commit) => self.repository.commit_detail(&commit.sha),
                 None => Ok("No commit selected".to_owned()),
             },
-            ViewMode::Branches => Ok(match self.state.branches.get(self.branch_selection) {
-                Some(branch) if branch.current => format!("Current branch: {}", branch.name),
-                Some(branch) => format!(
-                    "Branch: {}\n\nPress Enter to switch to this branch.",
-                    branch.name
-                ),
-                None => "No branch selected".to_owned(),
-            }),
+            ViewMode::Branches => match self.state.branches.get(self.branch_selection) {
+                Some(branch) => {
+                    let occupied = self.repository.workspaces()?.into_iter()
+                        .find(|workspace| workspace.branch == branch.name);
+                    Ok(if branch.current {
+                        format!("Current branch: {}\nWorktree: {}", branch.name, display_path(self.repository.root()))
+                    } else if let Some(workspace) = occupied {
+                        format!("Branch: {}\nChecked out in: {}\nOpen this checkout through Worktrees.", branch.name, display_path(&workspace.path))
+                    } else {
+                        format!("Branch: {}\n\nPress Enter to switch to this branch.", branch.name)
+                    })
+                }
+                None => Ok("No branch selected".to_owned()),
+            },
             ViewMode::Conflicts => {
                 let header = self.state.merge_state.summary();
                 let help =

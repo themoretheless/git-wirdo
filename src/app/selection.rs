@@ -27,7 +27,7 @@ impl App {
             ViewMode::History => Text(self.state.commits.get(index)?.sha.clone()),
             ViewMode::Branches => Text(self.state.branches.get(index)?.name.clone()),
             ViewMode::Conflicts => Path(self.state.merge_state.conflicts.get(index)?.clone()),
-            ViewMode::Workspaces => Path(self.workspaces.items.get(index)?.path.clone()),
+            ViewMode::Worktrees => Path(self.workspaces.items.get(index)?.path.clone()),
             ViewMode::PullRequests => Pr(self.pull_requests.items.get(index)?.number),
             ViewMode::GitHubRepositories => Text(
                 self.github_repositories

@@ -13,6 +13,11 @@ use crate::model::{ViewMode, display_path};
 /// UI-independent commands; terminal key bindings live in `input`.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Action {
+    WorktreeFrom,
+    WorktreeExisting,
+    LockWorktree,
+    UnlockWorktree,
+    MoveWorktree,
     EditLines,
     RawInteractiveRebase,
     ToggleFileSelection,
@@ -91,7 +96,11 @@ impl Action {
     /// the terminal thread; everything that touches Git or GitHub runs in the worker.
     pub fn runs_locally(self, view: ViewMode) -> bool {
         match self {
-            Self::EditLines
+            Self::WorktreeFrom
+            | Self::WorktreeExisting
+            | Self::LockWorktree
+            | Self::UnlockWorktree
+            | Self::EditLines
             | Self::ToggleFileSelection
             | Self::FilterList
             | Self::StageLines
@@ -127,7 +136,7 @@ impl Action {
             // Editing a pull request fetches its current text before the prompt opens.
             Self::EditRemote => view != ViewMode::PullRequests,
             // Discarding a file snapshots it before asking for confirmation.
-            Self::Remove => view != ViewMode::Files,
+            Self::Remove => !matches!(view, ViewMode::Files | ViewMode::Worktrees),
             _ => false,
         }
     }
@@ -311,7 +320,7 @@ impl App {
                     self.start_prefilled_prompt(
                         HistoryPrompt::Interactive(plan),
                         vec![
-                            "Rebase todo: pick / squash / fixup; newline or ; separates entries",
+                            "Rebase todo: pick / squash / fixup / edit / drop; newline or ; separates entries",
                             "Type rebase to rewrite local history",
                         ],
                         vec![todo, String::new()],
@@ -733,10 +742,42 @@ impl App {
             Action::OpenRepository => {
                 self.start_prompt(RepositoryPrompt::Open, vec!["Repository path"])
             }
-            Action::New if self.view == ViewMode::Workspaces => self.start_prompt(
+            Action::WorktreeFrom if self.view == ViewMode::Worktrees => self.start_prompt(
+                RepositoryPrompt::CreateWorktreeFrom,
+                vec!["Worktree path", "New branch name", "Base commit or ref"],
+            ),
+            Action::WorktreeExisting if self.view == ViewMode::Worktrees => self.start_prompt(
+                RepositoryPrompt::CreateWorktreeExisting,
+                vec!["Worktree path", "Existing local branch name"],
+            ),
+            Action::LockWorktree | Action::UnlockWorktree if self.view == ViewMode::Worktrees => {
+                if let Some(workspace) = self.workspaces.selected().cloned() {
+                    if action == Action::LockWorktree {
+                        self.start_prompt(
+                            RepositoryPrompt::LockWorktree(workspace),
+                            vec!["Lock reason"],
+                        );
+                    } else {
+                        self.start_prompt(
+                            RepositoryPrompt::UnlockWorktree(workspace),
+                            vec!["Type unlock to confirm"],
+                        );
+                    }
+                }
+            }
+            Action::MoveWorktree if self.view == ViewMode::Worktrees => {
+                if let Some(workspace) = self.workspaces.selected() {
+                    let request = self.repository.prepare_worktree_removal(workspace)?;
+                    self.start_prompt(
+                        RepositoryPrompt::MoveWorktree(request),
+                        vec!["New worktree path"],
+                    );
+                }
+            }
+            Action::New if self.view == ViewMode::Worktrees => self.start_prompt(
                 RepositoryPrompt::CreateWorktree,
                 vec![
-                    "Workspace path (relative to repo or absolute)",
+                    "Worktree path (relative to repo or absolute)",
                     "New branch name",
                 ],
             ),
@@ -749,11 +790,16 @@ impl App {
                     "Published head branch (or owner:branch)",
                 ],
             ),
-            Action::Remove if self.view == ViewMode::Workspaces => {
+            Action::Remove if self.view == ViewMode::Worktrees => {
                 if let Some(w) = self.workspaces.selected().cloned() {
-                    self.message = format!("Remove {}? Branch will remain.", display_path(&w.path));
+                    self.message = format!(
+                        "Remove {}? Branch or detached HEAD will be retained.",
+                        display_path(&w.path)
+                    );
                     self.start_prompt(
-                        RepositoryPrompt::RemoveWorktree(w),
+                        RepositoryPrompt::RemoveWorktree(
+                            self.repository.prepare_worktree_removal(&w)?,
+                        ),
                         vec!["Type remove to confirm"],
                     );
                 }
@@ -795,7 +841,7 @@ impl App {
                     self.detail_column = 0;
                 }
             }
-            Action::SwitchBranch if self.view == ViewMode::Workspaces => {
+            Action::SwitchBranch if self.view == ViewMode::Worktrees => {
                 if let Some(w) = self.workspaces.selected() {
                     let path = w.path.clone();
                     self.open_repository(&path)?;

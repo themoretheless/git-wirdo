@@ -231,12 +231,23 @@ fn native_windows_terminal_opens_worktrees_and_generic_local_clone() {
         "base"
     );
     assert!(!cloned.join("retain").exists());
-    for view in ["History", "Branches", "Conflicts", "Workspaces"] {
+    for view in ["History", "Branches", "Conflicts", "Worktrees"] {
         terminal.key(b"\t", &format!("View: {view}"));
     }
-    terminal.key(b"N", "Workspace path (relative to repo or absolute):");
+    terminal.key(b"N", "Worktree path (relative to repo or absolute):");
     terminal.field(workspace.to_str().unwrap(), "New branch name:");
-    terminal.field("native-worktree", "Workspace created");
+    terminal.field("native-worktree", "Worktree created");
+    terminal.key(b"j", "Branch: native-worktree");
+    terminal.key(b":", "Commands:");
+    terminal.field("Lock selected worktree", "Lock reason:");
+    terminal.field("retain offline", "Worktree locked");
+    assert!(
+        support::git(&cloned, &["worktree", "list", "--porcelain"])
+            .contains("locked retain offline")
+    );
+    terminal.key(b":", "Commands:");
+    terminal.field("Unlock selected worktree", "Type unlock to confirm:");
+    terminal.field("unlock", "Worktree unlocked");
     terminal.key(b"O", "Repository path:");
     terminal.field(workspace.to_str().unwrap(), "Opened repository");
     assert_eq!(
@@ -516,5 +527,95 @@ fn visual_lines_live_filters_and_selected_stash_in_conpty() {
             .trim(),
         "zzz"
     );
+    terminal.quit();
+}
+
+#[test]
+fn visual_reword_drop_and_edit_stop_in_conpty() {
+    let repo = TestRepo::new();
+    repo.write("base", "base");
+    repo.commit_all("base");
+    for name in ["a", "b", "c"] {
+        repo.write(name, name);
+        repo.commit_all(name);
+    }
+    let mut terminal = Terminal::new(&repo);
+    terminal.key(b"\t", "View: History");
+    terminal.key(b"j", "b");
+    terminal.key(b"j", "a");
+    terminal.key(b"j", "base");
+    terminal.key(b"~", "Interactive rebase | oldest first");
+    terminal.key(b"r", "Replacement commit message:");
+    terminal.key(b"\x15", "Replacement commit message:");
+    terminal.field("new a; literal $()", "reword");
+    terminal.key(b"j", "Interactive rebase | oldest first");
+    terminal.key(b"d", "drop");
+    terminal.key(b"j", "Interactive rebase | oldest first");
+    terminal.key(b"e", "edit");
+    terminal.key(b"v", "DROP: b");
+    terminal.key(b"\r", "Type rebase");
+    terminal.field("rebase", "Interactive rebase paused");
+    assert!(
+        repo.open()
+            .load_state()
+            .unwrap()
+            .merge_state
+            .rebase_in_progress
+    );
+    assert!(!repo.path.join("b").exists());
+    assert_eq!(
+        repo.git(&["log", "-1", "--format=%s", "HEAD~1"]).trim(),
+        "new a; literal $()"
+    );
+    terminal.key(b"e", "Continued Git operation");
+    assert!(
+        !repo
+            .open()
+            .load_state()
+            .unwrap()
+            .merge_state
+            .rebase_in_progress
+    );
+    terminal.quit();
+}
+
+#[test]
+fn detached_worktree_removal_has_visible_recovery_in_conpty() {
+    let repo = TestRepo::new();
+    repo.write("file", "base");
+    repo.commit_all("base");
+    let path = repo.directory.0.join("detached checkout");
+    repo.git(&[
+        "worktree",
+        "add",
+        "--detach",
+        path.to_str().unwrap(),
+        "HEAD",
+    ]);
+    support::git(&path, &["commit", "--allow-empty", "-m", "detached unique"]);
+    let head = support::git(&path, &["rev-parse", "HEAD"]);
+    let mut terminal = Terminal::new(&repo);
+    for view in ["History", "Branches", "Conflicts", "Worktrees"] {
+        terminal.key(b"\t", &format!("View: {view}"));
+    }
+    terminal.key(b"j", "Branch: detached");
+    terminal.key(b"D", "Type remove to confirm:");
+    terminal.field("remove", "detached HEAD saved in Reflog recovery refs");
+    assert!(!path.exists());
+    assert!(
+        !repo
+            .git(&[
+                "for-each-ref",
+                "--contains",
+                head.trim(),
+                "--format=%(refname)",
+                "refs/git-wirdo/recovery/"
+            ])
+            .trim()
+            .is_empty()
+    );
+    terminal.key(b":", "Commands:");
+    terminal.field("View reflog", "View: Reflog");
+    terminal.expect("detached unique");
     terminal.quit();
 }

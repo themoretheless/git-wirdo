@@ -166,3 +166,143 @@ The ConPTY flow returns from Hunks through the existing View files palette entry
 Tab cycles through Reflog and other views instead of jumping directly to Files.
 The Hunks footer now describes that navigation accurately. Git/index/stash oracles
 and terminal deadlines are unchanged.
+
+
+## Reliability restart — 2026-10-21
+
+The accepted 2026-10-14/15 work is retained. Workspaces terminology is now
+Worktrees throughout the UI, with the old CLI flag and persisted view spelling
+kept compatible. The following are reproduced defects, not hypothetical features.
+
+| ID | Reproduction before fix | Change | Evidence |
+| --- | --- | --- | --- |
+| R8 | Open removal confirmation, switch the linked tree to another branch externally, then confirm. The replacement checkout was deleted. | Capture branch, HEAD and canonical Git directory before confirmation; revalidate on submit. Preparation runs in the cancellable worker. | `removal_confirmation_rejects_a_different_branch_at_the_selected_path`; separate HEAD-movement test; Unix PTY repeats external branch change. |
+| R9 | Create an ignored directory containing personal notes in an otherwise clean linked tree; remove it. Native Git deletes ignored contents even without force. | Inspect ignored and untracked paths before deletion and refuse nonempty status. | `ignored_files_are_retained_when_removing_a_worktree`; Unix PTY verifies ignored contents remain. |
+| R10 | Mark a tracked file assume-unchanged, edit it, remove the tree. Native Git deletes the hidden edits. | Refuse removal with assume-unchanged or skip-worktree index entries. Real index flags are not modified. | `assume_unchanged_edits_are_not_deleted_with_a_worktree`. |
+| R11 | Retain CHERRY_PICK_HEAD while files/index are clean, then remove the tree. Native Git discards the operation state. | Check per-worktree merge/rebase/am/cherry-pick/revert state before removal. | `unfinished_operation_is_not_discarded_with_a_clean_worktree` verifies marker and files retained. |
+
+The four reproductions failed before their respective fixes. Additional tests
+cover a new lock or untracked file after confirmation and preservation of branch
+refs/unique commits. This is not filesystem-wide exclusion: an external process
+can still change files after the final check. No force removal is used, and no
+existing user branch or worktree is deleted by development work.
+
+### Fresh baseline
+
+[Raw probes and environment](performance-2026-10-21.json) record release Rust
+1.98.1 on macOS arm64, one warmup and 15 samples per probe. The original runner's
+`rustc` field reports the default shell toolchain; `probe_build_rustc` records the
+actual compiler used to build the executable. The same existing probe and
+fixtures were used. The host was concurrently running validation and other work;
+load is recorded. These are baseline measurements, not an optimization result.
+
+| Fixture | Startup median / p95 ms | Refresh median / p95 ms | Open diff median / p95 ms | Search median / p95 ms | Cancel total median / p95 ms | Max RSS MiB |
+| --- | --- | --- | --- | --- | --- | --- |
+| 20 commits / 10 files | 136.23 / 154.28 | 138.29 / 152.42 | 27.98 / 41.64 | 1.44 / 1.52 | 61.96 / 62.95 | 22.69 |
+| 3000 commits / 10 files | 159.54 / 255.80 | 142.95 / 178.99 | 29.14 / 44.77 | 1.45 / 1.70 | 58.99 / 62.58 | 24.06 |
+| 20 commits / 3000 files | 420.67 / 682.40 | 681.91 / 957.69 | 54.89 / 70.12 | 2.75 / 4.63 | 57.46 / 64.16 | 16.97 |
+
+Cancel includes the intentional 25 ms wait. The ordinary render probe does not
+measure large-diff terminal drawing; open_diff advances/clamps through file rows.
+15-sample p95 is the largest observation. Startup times App construction after
+repository discovery. No startup, refresh or memory improvement is claimed.
+
+### Remaining audit / feature queue
+
+This register is not 2000 completed improvements. Remaining investigations include
+fault injection for disk-full/permission errors and process exit at every selected
+stash cleanup boundary; reproducible large-diff drawing/input latency; and broader
+cross-platform filesystem races. Existing injected stash failures, cancellation,
+panic recovery, stale index/HEAD, snapshot refresh and terminal tests remain
+required gates. Feature delivery follows reliability gates: worktree branch/base
+selection and lock/move, then rebase reword/edit/drop and conflict-view design.
+
+
+## Worktree management follow-up — 2026-10-21
+
+| ID | Previous gap | Change | Evidence |
+| --- | --- | --- | --- |
+| W1 | Creation always made a new branch at HEAD. | Palette forms create at an explicit resolved commit/ref or check out an existing local branch. No force checkout. | Real Git tests inspect both HEADs, source index/files, occupied branch refusal and invalid-base refusal; Unix PTY drives both forms. |
+| W2 | An occupied branch failed checkout without showing its location. | Branch details show the linked checkout path. | Worktree branch detail regression. |
+| W3 | Worktree locks required a separate terminal. | Palette lock with reason and typed unlock confirmation, revalidating selected path/branch/lock state. | Git porcelain oracle, stale-lock refusal, Unix PTY and native Windows ConPTY flow. |
+| W4 | Moving a linked checkout required a separate terminal. | Palette destination form and checked target snapshot, normal Git move without force. | Independent staged/unstaged/untracked content and Git registration checks; stale move refusal; real Unix PTY. |
+
+Current/primary/locked trees and trees with unfinished Git operations cannot be moved. Moving the active checkout is not
+supported. Old recent-root settings are retained at the old path until explicitly
+forgotten; navigation can open the destination and save its own settings. Native
+Git controls submodule and destination restrictions. No new shortcut or configuration
+format is added. Lock reasons are stored by Git; the current compact model displays
+lock state but not the reason. No performance improvement is claimed.
+
+## Visual rebase actions — 2026-10-21
+
+| ID | Previous gap | Change | Evidence |
+| --- | --- | --- | --- |
+| E1 | Rewording required an external editor. | `r` opens the complete original message; replacement text preserves Unicode, multiline bodies and literal shell characters. | Real Git message/body/tree/recovery oracles and visual/Unix PTY/native ConPTY scenarios. |
+| E2 | No edit stop in the visual todo. | `e` marks edit; successful pause opens Conflicts with an explicit paused message, then existing amend/continue/abort commands apply. | Independent rebase-state checks and continuation in a fresh Git process. |
+| E3 | Every commit had to be retained as content. | `d` explicitly marks drop; preview labels dropped commits. All prepared IDs still appear exactly once; at least one retained commit and a valid first retained action are required. | Missing/duplicate/all-drop rejection before ref mutation; file/tree/count/recovery tests. |
+| R12 | A child can emit LeaveAlternateScreen after the PTY driver's last drain but before try_wait reports exit. macOS CI reproduced an incorrect alternate-screen assertion. | Drain trailing output after observing child exit, then check terminal restoration without weakening assertions. | Original macOS CI failure and subsequent terminal suites. |
+
+Reword compiles into a generated pick/amend exec step with octal-encoded bytes;
+user shell commands remain forbidden. The generated command lives in Git's todo,
+so a later application restart/continue keeps replacement messages. No user text
+or path is interpolated as executable source. Plans are bounded to 24 KiB for
+portable environment transport. This is a Git amend operation and may execute
+configured Git commit hooks. Existing clean/attached/linear/1–200-commit guards,
+HEAD/branch checks and persistent recovery refs remain in place. No support for
+arbitrary exec, merge-preserving rebase, root rewriting or dropping every commit
+is claimed. Conflict prediction remains outside the preview.
+
+## Next conflict-view design (specification, not implemented)
+
+The current conflict detail is a combined Git diff. The next read-only preview
+should load exact stage 1/2/3 entries with literal NUL-delimited paths, then read
+blobs by their object IDs. Label them Base, Ours and Theirs, including the active
+Git operation so rebase's side meanings are clear. Missing stages mean deletion;
+binary contents and symlinks require explicit metadata views. Start with a
+switchable single pane for narrow terminals, then optionally a wide layout.
+Keep working-file editing and staging explicit. Any future block-resolution
+mutation must revalidate index stages and the working-file snapshot and have
+independent Git/index/file tests for modify/modify, add/add, modify/delete,
+rename conflicts, stale selection and abort. A preview is not a merge solver.
+
+## Special-repository audit matrix
+
+| Scenario | Current inspected implementation | Remaining validation / work |
+| --- | --- | --- |
+| Submodules | Native Git status; selected-only stash rejects directories; reset avoids recursive submodule reset. | Dedicated submodule views, nested state, dirty/untracked child preservation and explicit update policies are not implemented. |
+| Sparse checkout | Native Git behavior; worktree removal now refuses skip-worktree entries. | No sparse-pattern editor or sparse-index acceptance matrix. Test absent paths, expansion, staging and checkout before enabling an editor. |
+| Shallow / partial clone | Generic clone/open relies on Git. | No dedicated shallow-depth/filter controls or missing-object/offline/automatic-fetch acceptance matrix. |
+| Git LFS | Git filters/hooks may participate in native operations. | No LFS transfer UI, pointer/working-content distinction or offline/missing-object/error acceptance matrix. |
+
+These rows describe inspected code, not successful end-to-end support. They are
+candidates for the separately scoped next feature packages; no account/cloud
+agent requirement is introduced.
+
+
+## Detached worktree recovery — 2026-10-21
+
+R13: removing a clean detached worktree with a unique commit deleted its last HEAD
+reference/reflog; no branch retained the commit. A real-Git regression reproduced
+the missing reference. Removal now creates a persistent `refs/git-wirdo/recovery/`
+reference before deletion; failure to store it prevents removal. The UI identifies
+this outcome separately from retaining an attached branch. A recovery reference
+can remain after native removal fails, which is intentionally recoverable.
+
+The regression expires all reflogs and runs immediate GC in its disposable fixture,
+then independently reads the original committed file. The original checkout HEAD
+stays unchanged. Recovery references use the existing Reflog view and recovery-to-
+new-branch flow. No user repository reflogs, objects, branches or worktrees are
+expired or removed by the test.
+
+Recovery-ref write failures are injected as permission-denied and storage-full
+errors before command execution; both must retain the checkout, index and HEAD.
+These do not simulate a partially written physical filesystem or actual full disk.
+Unix PTY and native Windows ConPTY scenarios verify the detached-specific outcome
+and discovery in Reflog.
+
+R14: the new terminal recovery workflow exposed a display problem: full recovery
+ref names and full SHA values consumed the list pane, hiding commit subjects.
+Rows now use a compact recovery label and 12-character ID, preserving the full
+selector and SHA in the model. The same terminal scenario requires the unique
+commit subject to be visible in Reflog; it failed before this UI adjustment.

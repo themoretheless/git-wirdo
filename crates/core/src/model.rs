@@ -122,7 +122,8 @@ pub enum ViewMode {
     History,
     Branches,
     Conflicts,
-    Workspaces,
+    #[serde(rename = "Workspaces", alias = "Worktrees")]
+    Worktrees,
     PullRequests,
     GitHubRepositories,
     Stashes,
@@ -142,7 +143,7 @@ impl ViewMode {
         Self::History,
         Self::Branches,
         Self::Conflicts,
-        Self::Workspaces,
+        Self::Worktrees,
         Self::PullRequests,
         Self::GitHubRepositories,
         Self::Stashes,
@@ -195,7 +196,7 @@ pub fn display_path(path: &Path) -> String {
     path.to_string_lossy().escape_debug().to_string()
 }
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Workspace {
     pub path: PathBuf,
     pub branch: String,

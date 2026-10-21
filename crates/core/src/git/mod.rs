@@ -129,6 +129,7 @@ mod stash;
 mod tags;
 mod worktree_files;
 mod worktrees;
+pub use worktrees::WorktreeRemoval;
 
 impl Repository {
     /// Create a working tree explicitly, without reinitializing existing Git metadata.

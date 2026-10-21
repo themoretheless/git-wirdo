@@ -525,10 +525,10 @@ fn linked_worktree_creation_open_recent_return_and_guarded_removal_are_end_to_en
     repo.commit_all("base");
     let workspace = repo.directory.0.join("linked terminal workspace");
     let mut terminal = tui(&repo);
-    terminal.view("Workspaces");
-    terminal.key(b"N", "Workspace path");
+    terminal.view("Worktrees");
+    terminal.key(b"N", "Worktree path");
     terminal.field(workspace.to_str().unwrap(), "New branch name:");
-    terminal.field("topic", "Workspace created");
+    terminal.field("topic", "Worktree created");
     assert!(workspace.join(".git").is_file());
     // worktree list returns the primary checkout followed by its linked tree.
     terminal.key(b"j", "Branch: topic");
@@ -541,8 +541,8 @@ fn linked_worktree_creation_open_recent_return_and_guarded_removal_are_end_to_en
     std::fs::write(workspace.join("unsaved"), "retain linked work\n").unwrap();
     terminal.key(b"r", "unsaved");
     terminal.key(b"I", "View: RecentRepositories");
-    terminal.key(b"j", "Saved view: Workspaces");
-    terminal.key(b"\r", "View: Workspaces");
+    terminal.key(b"j", "Saved view: Worktrees");
+    terminal.key(b"\r", "View: Worktrees");
     terminal.key(b"j", "Branch: topic");
     terminal.key(b"D", "Type remove to confirm:");
     terminal.field("remove", "contains modified");
@@ -550,7 +550,32 @@ fn linked_worktree_creation_open_recent_return_and_guarded_removal_are_end_to_en
     std::fs::remove_file(workspace.join("unsaved")).unwrap();
     terminal.key(b"r", "Action: Refreshed");
     terminal.key(b"D", "Type remove to confirm:");
-    terminal.field("remove", "Workspace removed; branch retained");
+    support::git(&workspace, &["switch", "-c", "replacement"]);
+    terminal.field("remove", "Worktree changed");
+    assert!(workspace.join("file").exists());
+    support::git(&workspace, &["switch", "topic"]);
+    support::git(
+        &workspace,
+        &["config", "core.excludesFile", "ignored-patterns"],
+    );
+    std::fs::write(
+        workspace.join("ignored-patterns"),
+        "ignored-patterns\nnotes\n",
+    )
+    .unwrap();
+    std::fs::write(workspace.join("notes"), "private ignored notes\n").unwrap();
+    terminal.key(b"r", "Action: Refreshed");
+    terminal.key(b"D", "Type remove to confirm:");
+    terminal.field("remove", "contains modified, untracked or ignored");
+    assert_eq!(
+        std::fs::read_to_string(workspace.join("notes")).unwrap(),
+        "private ignored notes\n"
+    );
+    std::fs::remove_file(workspace.join("notes")).unwrap();
+    std::fs::remove_file(workspace.join("ignored-patterns")).unwrap();
+    terminal.key(b"r", "Action: Refreshed");
+    terminal.key(b"D", "Type remove to confirm:");
+    terminal.field("remove", "Worktree removed; branch retained");
     assert!(!workspace.exists());
     assert!(
         repo.git(&["show-ref", "--verify", "refs/heads/topic"])
@@ -869,5 +894,139 @@ fn visual_rebase_reorder_and_preview_through_terminal() {
     terminal.field("rebase", "Interactive rebase completed");
     assert_eq!(repo.git(&["log", "-1", "--format=%s"]).trim(), "second");
     assert_eq!(repo.git(&["rev-list", "--count", "HEAD"]).trim(), "2");
+    terminal.quit();
+}
+
+#[test]
+fn worktree_palette_creates_from_branch_and_base_and_moves_dirty_checkout() {
+    let repo = TestRepo::new();
+    repo.write("file", "base\n");
+    repo.commit_all("base");
+    let base = repo.git(&["rev-parse", "HEAD"]);
+    repo.git(&["branch", "existing"]);
+    let path = repo.directory.0.join("existing ü");
+    let moved = repo.directory.0.join("moved ü");
+    let from = repo.directory.0.join("from-base");
+    let mut terminal = tui(&repo);
+    terminal.view("Worktrees");
+    terminal.key(b":", "Commands:");
+    terminal.field("Create worktree for existing branch", "Worktree path:");
+    terminal.field(path.to_str().unwrap(), "Existing local branch name:");
+    terminal.field("existing", "Worktree created for existing branch");
+    terminal.key(b"j", "Branch: existing");
+    terminal.key(b":", "Commands:");
+    terminal.field("Lock selected worktree", "Lock reason:");
+    terminal.field("retain offline", "Worktree locked");
+    assert!(
+        repo.git(&["worktree", "list", "--porcelain"])
+            .contains("locked retain offline")
+    );
+    terminal.key(b":", "Commands:");
+    terminal.field("Unlock selected worktree", "Type unlock to confirm:");
+    terminal.field("unlock", "Worktree unlocked");
+    std::fs::write(path.join("notes"), "retain untracked\n").unwrap();
+    terminal.key(b":", "Commands:");
+    terminal.field("Move selected worktree", "New worktree path:");
+    terminal.field(moved.to_str().unwrap(), "Worktree moved");
+    assert!(!path.exists());
+    assert_eq!(
+        std::fs::read_to_string(moved.join("notes")).unwrap(),
+        "retain untracked\n"
+    );
+    assert_eq!(support::git(&moved, &["show", ":file"]), "base\n");
+    terminal.key(b":", "Commands:");
+    terminal.field("Create worktree from commit or ref", "Worktree path:");
+    terminal.field(from.to_str().unwrap(), "New branch name:");
+    terminal.field("from-base", "Base commit or ref:");
+    terminal.field(base.trim(), "Worktree created from selected base");
+    assert_eq!(support::git(&from, &["rev-parse", "HEAD"]), base);
+    terminal.quit();
+}
+
+#[test]
+fn visual_reword_drop_and_edit_stop_through_terminal() {
+    let repo = TestRepo::new();
+    repo.write("base", "base");
+    repo.commit_all("base");
+    for name in ["a", "b", "c"] {
+        repo.write(name, name);
+        repo.commit_all(name);
+    }
+    let mut terminal = tui(&repo);
+    terminal.view("History");
+    terminal.key(b"j", "b");
+    terminal.key(b"j", "a");
+    terminal.key(b"j", "base");
+    terminal.key(b"~", "Interactive rebase | oldest first");
+    terminal.key(b"r", "Replacement commit message:");
+    terminal.key(b"\x15", "Replacement commit message:");
+    terminal.field("new a; literal $()", "reword");
+    terminal.key(b"j", "Interactive rebase | oldest first");
+    terminal.key(b"d", "drop");
+    terminal.key(b"j", "Interactive rebase | oldest first");
+    terminal.key(b"e", "edit");
+    terminal.key(b"v", "DROP: b");
+    terminal.key(b"\r", "Type rebase");
+    terminal.field("rebase", "Interactive rebase paused");
+    assert!(
+        repo.open()
+            .load_state()
+            .unwrap()
+            .merge_state
+            .rebase_in_progress
+    );
+    assert!(!repo.path.join("b").exists());
+    assert_eq!(
+        repo.git(&["log", "-1", "--format=%s", "HEAD~1"]).trim(),
+        "new a; literal $()"
+    );
+    terminal.key(b"e", "Continued Git operation");
+    assert!(
+        !repo
+            .open()
+            .load_state()
+            .unwrap()
+            .merge_state
+            .rebase_in_progress
+    );
+    terminal.quit();
+}
+
+#[test]
+fn detached_worktree_removal_has_visible_recovery_through_terminal() {
+    let repo = TestRepo::new();
+    repo.write("file", "base");
+    repo.commit_all("base");
+    let path = repo.directory.0.join("detached checkout");
+    repo.git(&[
+        "worktree",
+        "add",
+        "--detach",
+        path.to_str().unwrap(),
+        "HEAD",
+    ]);
+    support::git(&path, &["commit", "--allow-empty", "-m", "detached unique"]);
+    let head = support::git(&path, &["rev-parse", "HEAD"]);
+    let mut terminal = tui(&repo);
+    terminal.view("Worktrees");
+    terminal.key(b"j", "Branch: detached");
+    terminal.key(b"D", "Type remove to confirm:");
+    terminal.field("remove", "detached HEAD saved in Reflog recovery refs");
+    assert!(!path.exists());
+    assert!(
+        !repo
+            .git(&[
+                "for-each-ref",
+                "--contains",
+                head.trim(),
+                "--format=%(refname)",
+                "refs/git-wirdo/recovery/"
+            ])
+            .trim()
+            .is_empty()
+    );
+    terminal.key(b":", "Commands:");
+    terminal.field("View reflog", "View: Reflog");
+    terminal.expect("detached unique");
     terminal.quit();
 }

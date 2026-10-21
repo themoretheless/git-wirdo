@@ -39,7 +39,7 @@ fn create_switch_and_remove_workspaces_preserves_dirty_files_and_branches() {
     );
     repo.git(&["worktree", "unlock", path.to_str().unwrap()]);
     let mut app = App::new(repo.open()).unwrap();
-    app.set_view(ViewMode::Workspaces);
+    app.set_view(ViewMode::Worktrees);
     app.refresh().unwrap();
     app.select(
         app.workspaces()
@@ -76,7 +76,7 @@ fn prompts_consume_shortcuts_and_require_explicit_remove_confirmation() {
     repo.commit_all("base");
     let path = repo.directory.0.join("review");
     let mut app = App::new(repo.open()).unwrap();
-    app.set_view(ViewMode::Workspaces);
+    app.set_view(ViewMode::Worktrees);
     app.refresh().unwrap();
     app.handle(Action::New);
     type_text(&mut app, path.to_str().unwrap());
@@ -115,4 +115,391 @@ fn failed_open_preserves_current_repo_and_escape_cancels_prompt() {
     app.handle(Action::OpenRepository);
     app.handle_key(KeyEvent::new(KeyCode::Esc, KeyModifiers::NONE));
     assert!(app.prompt().is_none());
+}
+
+#[test]
+fn removal_confirmation_rejects_a_different_branch_at_the_selected_path() {
+    let repo = TestRepo::new();
+    repo.write("file", "base\n");
+    repo.commit_all("base");
+    let path = repo.directory.0.join("review");
+    repo.open().create_workspace(&path, "topic").unwrap();
+    let mut app = App::new(repo.open()).unwrap();
+    app.set_view(ViewMode::Worktrees);
+    app.refresh().unwrap();
+    app.select(
+        app.workspaces()
+            .items
+            .iter()
+            .position(|w| w.branch == "topic")
+            .unwrap(),
+    );
+    app.handle(Action::Remove);
+    support::git(&path, &["switch", "-c", "replacement"]);
+    type_text(&mut app, "remove");
+    assert!(app.message_is_error(), "{}", app.message());
+    assert!(path.join("file").exists());
+    assert_eq!(
+        support::git(&path, &["branch", "--show-current"]).trim(),
+        "replacement"
+    );
+}
+
+#[test]
+fn removal_confirmation_rejects_new_head_and_keeps_unique_commit() {
+    let repo = TestRepo::new();
+    repo.write("file", "base\n");
+    repo.commit_all("base");
+    let path = repo.directory.0.join("review");
+    let repository = repo.open();
+    repository.create_workspace(&path, "topic").unwrap();
+    let selected = repository
+        .workspaces()
+        .unwrap()
+        .into_iter()
+        .find(|w| w.branch == "topic")
+        .unwrap();
+    let request = repository.prepare_worktree_removal(&selected).unwrap();
+    support::git(&path, &["commit", "--allow-empty", "-m", "unique"]);
+    let head = support::git(&path, &["rev-parse", "HEAD"]);
+    assert!(repository.remove_prepared_worktree(&request).is_err());
+    assert!(path.join(".git").is_file());
+    assert_eq!(support::git(&path, &["rev-parse", "HEAD"]), head);
+    assert_eq!(repo.git(&["rev-parse", "topic"]), head);
+}
+
+#[test]
+fn lock_or_new_untracked_file_after_confirmation_prevents_removal() {
+    let repo = TestRepo::new();
+    repo.write("file", "base\n");
+    repo.commit_all("base");
+    let path = repo.directory.0.join("review");
+    let repository = repo.open();
+    repository.create_workspace(&path, "topic").unwrap();
+    let selected = repository
+        .workspaces()
+        .unwrap()
+        .into_iter()
+        .find(|w| w.branch == "topic")
+        .unwrap();
+    let request = repository.prepare_worktree_removal(&selected).unwrap();
+    repo.git(&["worktree", "lock", path.to_str().unwrap()]);
+    assert!(repository.remove_prepared_worktree(&request).is_err());
+    repo.git(&["worktree", "unlock", path.to_str().unwrap()]);
+    std::fs::write(path.join("new"), "retain\n").unwrap();
+    assert!(repository.remove_prepared_worktree(&request).is_err());
+    assert_eq!(
+        std::fs::read_to_string(path.join("new")).unwrap(),
+        "retain\n"
+    );
+    assert_eq!(support::git(&path, &["show", ":file"]), "base\n");
+}
+
+#[test]
+fn ignored_files_are_retained_when_removing_a_worktree() {
+    let repo = TestRepo::new();
+    repo.write(".gitignore", "private/\n");
+    repo.commit_all("base");
+    let path = repo.directory.0.join("review");
+    let repository = repo.open();
+    repository.create_workspace(&path, "topic").unwrap();
+    std::fs::create_dir(path.join("private")).unwrap();
+    std::fs::write(path.join("private/notes"), "retain ignored notes\n").unwrap();
+    let selected = repository
+        .workspaces()
+        .unwrap()
+        .into_iter()
+        .find(|w| w.branch == "topic")
+        .unwrap();
+    assert!(repository.remove_workspace(&selected).is_err());
+    assert_eq!(
+        std::fs::read_to_string(path.join("private/notes")).unwrap(),
+        "retain ignored notes\n"
+    );
+}
+
+#[test]
+fn assume_unchanged_edits_are_not_deleted_with_a_worktree() {
+    let repo = TestRepo::new();
+    repo.write("file", "base\n");
+    repo.commit_all("base");
+    let path = repo.directory.0.join("review");
+    let repository = repo.open();
+    repository.create_workspace(&path, "topic").unwrap();
+    support::git(&path, &["update-index", "--assume-unchanged", "file"]);
+    std::fs::write(path.join("file"), "hidden edits\n").unwrap();
+    let selected = repository
+        .workspaces()
+        .unwrap()
+        .into_iter()
+        .find(|w| w.branch == "topic")
+        .unwrap();
+    assert!(repository.remove_workspace(&selected).is_err());
+    assert_eq!(
+        std::fs::read_to_string(path.join("file")).unwrap(),
+        "hidden edits\n"
+    );
+}
+
+#[test]
+fn unfinished_operation_is_not_discarded_with_a_clean_worktree() {
+    let repo = TestRepo::new();
+    repo.write("file", "base\n");
+    repo.commit_all("base");
+    let path = repo.directory.0.join("review");
+    let repository = repo.open();
+    repository.create_workspace(&path, "topic").unwrap();
+    let git_dir =
+        std::path::PathBuf::from(support::git(&path, &["rev-parse", "--absolute-git-dir"]).trim());
+    let before_operation = repository
+        .workspaces()
+        .unwrap()
+        .into_iter()
+        .find(|w| w.branch == "topic")
+        .unwrap();
+    let request = repository
+        .prepare_worktree_removal(&before_operation)
+        .unwrap();
+    let head = support::git(&path, &["rev-parse", "HEAD"]);
+    std::fs::write(git_dir.join("CHERRY_PICK_HEAD"), &head).unwrap();
+    assert!(
+        repository
+            .move_worktree(&request, &repo.directory.0.join("moved"))
+            .is_err()
+    );
+    let selected = repository
+        .workspaces()
+        .unwrap()
+        .into_iter()
+        .find(|w| w.branch == "topic")
+        .unwrap();
+    assert!(repository.remove_workspace(&selected).is_err());
+    assert_eq!(
+        std::fs::read_to_string(git_dir.join("CHERRY_PICK_HEAD")).unwrap(),
+        head
+    );
+    assert!(path.join("file").exists());
+}
+
+#[test]
+fn worktrees_use_existing_branches_and_explicit_bases_without_changing_current_files() {
+    let repo = TestRepo::new();
+    repo.write("file", "base\n");
+    repo.commit_all("base");
+    let base = repo.git(&["rev-parse", "HEAD"]);
+    repo.git(&["branch", "existing"]);
+    repo.write("file", "later\n");
+    repo.commit_all("later");
+    repo.write("file", "unstaged original\n");
+    let before_index = repo.git(&["ls-files", "--stage"]);
+    let repository = repo.open();
+    let existing = repo.directory.0.join("existing ü");
+    repository
+        .create_worktree_existing(&existing, "existing")
+        .unwrap();
+    let from = repo.directory.0.join("from base");
+    repository
+        .create_worktree_from(&from, "from-base", base.trim())
+        .unwrap();
+    assert_eq!(support::git(&existing, &["rev-parse", "HEAD"]), base);
+    assert_eq!(support::git(&from, &["rev-parse", "HEAD"]), base);
+    assert_eq!(repo.git(&["ls-files", "--stage"]), before_index);
+    assert_eq!(
+        std::fs::read_to_string(repo.path.join("file")).unwrap(),
+        "unstaged original\n"
+    );
+    let occupied = repo.directory.0.join("occupied");
+    assert!(
+        repository
+            .create_worktree_existing(&occupied, "existing")
+            .is_err()
+    );
+    assert!(!occupied.exists());
+    assert!(
+        repository
+            .create_worktree_existing(&occupied, "does-not-exist")
+            .is_err()
+    );
+    assert!(
+        repository
+            .create_worktree_from(&occupied, "invalid-base", "--help")
+            .is_err()
+    );
+    assert!(
+        repo.git(&["branch", "--list", "invalid-base"])
+            .trim()
+            .is_empty()
+    );
+    let mut app = App::new(repository).unwrap();
+    app.set_view(ViewMode::Branches);
+    app.select(
+        app.state()
+            .branches
+            .iter()
+            .position(|b| b.name == "existing")
+            .unwrap(),
+    );
+    assert!(app.detail_text().contains("Checked out in:"));
+    assert!(app.detail_text().contains("existing ü"));
+}
+
+#[test]
+fn lock_unlock_and_move_preserve_dirty_files_and_index_and_reject_stale_requests() {
+    let repo = TestRepo::new();
+    repo.write("file", "base\n");
+    repo.commit_all("base");
+    let path = repo.directory.0.join("review");
+    let moved = repo.directory.0.join("moved ü");
+    let repository = repo.open();
+    repository.create_workspace(&path, "topic").unwrap();
+    let entry = || {
+        repository
+            .workspaces()
+            .unwrap()
+            .into_iter()
+            .find(|w| w.branch == "topic")
+            .unwrap()
+    };
+    let selected = entry();
+    let request = repository.prepare_worktree_removal(&selected).unwrap();
+    repository
+        .set_worktree_lock(&selected, true, "retain while offline")
+        .unwrap();
+    assert!(entry().locked);
+    assert!(repository.move_worktree(&request, &moved).is_err());
+    assert!(repository.set_worktree_lock(&selected, false, "").is_err());
+    repository.set_worktree_lock(&entry(), false, "").unwrap();
+    std::fs::write(path.join("file"), "staged\n").unwrap();
+    support::git(&path, &["add", "file"]);
+    std::fs::write(path.join("file"), "unstaged\n").unwrap();
+    std::fs::write(path.join("notes"), "untracked\n").unwrap();
+    repository.move_worktree(&request, &moved).unwrap();
+    assert!(!path.exists());
+    assert_eq!(support::git(&moved, &["show", ":file"]), "staged\n");
+    assert_eq!(
+        std::fs::read_to_string(moved.join("file")).unwrap(),
+        "unstaged\n"
+    );
+    assert_eq!(
+        std::fs::read_to_string(moved.join("notes")).unwrap(),
+        "untracked\n"
+    );
+    assert_eq!(
+        entry().path.canonicalize().unwrap(),
+        moved.canonicalize().unwrap()
+    );
+    assert!(repository.move_worktree(&request, &path).is_err());
+}
+
+#[test]
+fn removing_a_detached_worktree_retains_its_unique_head_in_recovery_refs() {
+    let repo = TestRepo::new();
+    repo.write("file", "base\n");
+    repo.commit_all("base");
+    let base = repo.git(&["rev-parse", "HEAD"]);
+    let path = repo.directory.0.join("detached");
+    repo.git(&[
+        "worktree",
+        "add",
+        "--detach",
+        path.to_str().unwrap(),
+        "HEAD",
+    ]);
+    std::fs::write(path.join("file"), "unique detached work\n").unwrap();
+    support::git(&path, &["add", "file"]);
+    support::git(&path, &["commit", "-m", "unique detached commit"]);
+    let head = support::git(&path, &["rev-parse", "HEAD"]);
+    assert!(
+        repo.git(&[
+            "for-each-ref",
+            "--contains",
+            head.trim(),
+            "--format=%(refname)"
+        ])
+        .trim()
+        .is_empty()
+    );
+    let repository = repo.open();
+    let selected = repository
+        .workspaces()
+        .unwrap()
+        .into_iter()
+        .find(|w| w.path.canonicalize().unwrap() == path.canonicalize().unwrap())
+        .unwrap();
+    repository.remove_workspace(&selected).unwrap();
+    assert!(!path.exists());
+    assert_eq!(repo.git(&["rev-parse", "HEAD"]), base);
+    let retained = repo.git(&[
+        "for-each-ref",
+        "--contains",
+        head.trim(),
+        "--format=%(refname)",
+        "refs/git-wirdo/recovery/",
+    ]);
+    assert!(
+        !retained.trim().is_empty(),
+        "unique detached HEAD lost its last reference"
+    );
+    // Expiring reflogs and pruning unreachable objects must still retain this commit.
+    repo.git(&["reflog", "expire", "--expire=now", "--all"]);
+    repo.git(&["gc", "--prune=now"]);
+    assert_eq!(
+        repo.git(&["show", &format!("{}:file", head.trim())]),
+        "unique detached work\n"
+    );
+}
+
+#[derive(Debug)]
+struct RefWriteFailure(std::io::ErrorKind);
+impl git_wirdo::git::GitRunner for RefWriteFailure {
+    fn output(
+        &self,
+        command: &mut std::process::Command,
+        input: Option<&[u8]>,
+    ) -> anyhow::Result<std::process::Output> {
+        if command.get_args().any(|arg| arg == "update-ref") {
+            return Err(std::io::Error::new(self.0, "injected recovery ref failure").into());
+        }
+        git_wirdo::git::GitRunner::output(&git_wirdo::git::ProcessRunner, command, input)
+    }
+}
+
+#[test]
+fn recovery_ref_permission_or_storage_failure_keeps_the_detached_checkout() {
+    for kind in [
+        std::io::ErrorKind::PermissionDenied,
+        std::io::ErrorKind::StorageFull,
+    ] {
+        let repo = TestRepo::new();
+        repo.write("file", "base\n");
+        repo.commit_all("base");
+        let path = repo.directory.0.join("detached");
+        repo.git(&[
+            "worktree",
+            "add",
+            "--detach",
+            path.to_str().unwrap(),
+            "HEAD",
+        ]);
+        let repository = git_wirdo::git::Repository::open_with(
+            &repo.path,
+            std::sync::Arc::new(RefWriteFailure(kind)),
+        )
+        .unwrap();
+        let selected = repository
+            .workspaces()
+            .unwrap()
+            .into_iter()
+            .find(|w| w.branch == "detached")
+            .unwrap();
+        let head = support::git(&path, &["rev-parse", "HEAD"]);
+        assert!(repository.remove_workspace(&selected).is_err());
+        assert!(path.join(".git").is_file());
+        assert_eq!(support::git(&path, &["rev-parse", "HEAD"]), head);
+        assert_eq!(support::git(&path, &["show", ":file"]), "base\n");
+        assert_eq!(
+            std::fs::read_to_string(path.join("file")).unwrap(),
+            "base\n"
+        );
+    }
 }

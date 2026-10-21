@@ -123,7 +123,7 @@ impl Ui {
                     .highlight_style(Style::default().fg(Color::Cyan));
                 frame.render_stateful_widget(widget, preview, &mut self.rebase_preview);
             } else {
-                let text = "j/k select commit\nJ/K move commit\np pick, s squash, f fixup\nv preview resulting groups\nPgUp/PgDn scroll preview\nEnter review and confirm\nEsc cancel\n\nSquash combines messages.\nFixup discards its message.\nOriginal HEAD is saved for recovery.";
+                let text = "j/k select commit\nJ/K move commit\np pick, s squash, f fixup\nr reword, e edit, d drop\nv preview resulting groups\nPgUp/PgDn scroll preview\nEnter review and confirm\nEsc cancel\n\nSquash combines messages.\nFixup discards its message.\nOriginal HEAD is saved for recovery.";
                 frame.render_widget(
                     Paragraph::new(text).wrap(Wrap { trim: false }).block(
                         Block::default()
@@ -232,7 +232,7 @@ fn render_footer(frame: &mut Frame<'_>, area: Rect, app: &App) {
     } else if app.line_editor.is_some() {
         "Select lines: j/k move | PgUp/Dn, Home/End jump | Space toggle | v range | s stage | u unstage | Esc cancel".into()
     } else if app.rebase_editor.is_some() {
-        "Rebase: j/k select | J/K reorder | p pick | s squash | f fixup | v preview | PgUp/Dn preview | Enter confirm | Esc cancel".into()
+        "Rebase: j/k select | J/K reorder | p/s/f actions | r reword | e edit | d drop | v preview | PgUp/Dn preview | Enter confirm | Esc cancel".into()
     } else if app.searching {
         format!(
             "Find: {}_ (Enter search, Esc cancel)",
@@ -324,7 +324,7 @@ fn shortcuts(view: ViewMode) -> &'static str {
         ViewMode::GitHubRepositories => {
             "enter clone | N create repository | G auth status | O open local repository"
         }
-        ViewMode::Workspaces => "enter open | N create | D remove | O open repository",
+        ViewMode::Worktrees => "enter open | N create | D remove | O open repository",
         ViewMode::PrFiles => "j/k file | C line comment | PgUp/PgDn patch | r refresh",
         ViewMode::PullRequests => {
             "i files | U filter | + more | L edit | T draft/ready | M merge | A/R review | C comment | V diff"
@@ -394,7 +394,7 @@ fn list_items(app: &App) -> (Vec<ListItem<'static>>, bool) {
                 .collect(),
             "No repositories",
         ),
-        ViewMode::Workspaces => (
+        ViewMode::Worktrees => (
             app.workspaces
                 .items
                 .iter()
@@ -407,7 +407,7 @@ fn list_items(app: &App) -> (Vec<ListItem<'static>>, bool) {
                     )
                 })
                 .collect(),
-            "No workspaces",
+            "No worktrees",
         ),
         ViewMode::PrFiles => (
             app.pr_files
@@ -461,7 +461,19 @@ fn list_items(app: &App) -> (Vec<ListItem<'static>>, bool) {
             app.reflog
                 .items
                 .iter()
-                .map(|e| format!("{} {} {}", e.selector, e.sha, e.subject))
+                .map(|e| {
+                    let label = if e.selector.starts_with("refs/git-wirdo/recovery/") {
+                        "recovery"
+                    } else {
+                        &e.selector
+                    };
+                    format!(
+                        "{} {} {}",
+                        label,
+                        e.sha.get(..12).unwrap_or(&e.sha),
+                        e.subject
+                    )
+                })
                 .collect(),
             "No reflog entries",
         ),
